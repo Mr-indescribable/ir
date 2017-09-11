@@ -1,0 +1,27 @@
+#!/usr/bin/python3.6
+# coding: utf-8
+
+
+from multiprocessing import Process
+from ir.local import LocalTCPServer, LocalUDPServer
+
+
+config_path = 'example/local_config.example.json'
+
+
+def run_tcp(config_path):
+    server = LocalTCPServer(config_path)
+    server.run()
+
+
+def run_udp(config_path):
+    server = LocalUDPServer(config_path)
+    server.run()
+
+
+tcp_server = Process(target=run_tcp, args=[config_path])
+udp_server = Process(target=run_udp, args=[config_path])
+tcp_server.start()
+udp_server.start()
+tcp_server.join()
+udp_server.join()

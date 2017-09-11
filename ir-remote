@@ -1,0 +1,27 @@
+#!/usr/bin/python3.6
+# coding: utf-8
+
+
+from multiprocessing import Process
+from ir.remote import RemoteTCPServer, RemoteUDPServer
+
+
+config_path = 'example/remote_config.example.json'
+
+
+def run_tcp(config_path):
+    server = RemoteTCPServer(config_path)
+    server.run()
+
+
+def run_udp(config_path):
+    server = RemoteUDPServer(config_path)
+    server.run()
+
+
+tcp_server = Process(target=run_tcp, args=[config_path])
+udp_server = Process(target=run_udp, args=[config_path])
+tcp_server.start()
+udp_server.start()
+tcp_server.join()
+udp_server.join()

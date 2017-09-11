@@ -1,0 +1,13 @@
+{
+	"listen_addr": "0.0.0.0",
+	"listen_tcp_port": 6040,
+	"listen_udp_port": 6050,
+	"cipher_name": "aes-256-gcm",
+	"passwd": "An indescribable password",
+	"udp_socket_max_idle_time": 60,
+	"log_level": "info",
+	"crypto_libpath": "/usr/lib/libcrypto.so.1.1",
+	"udp_multi_source": ["192.168.122.171", "192.168.122.23"],
+	"udp_multi_transmit_times": 1,
+	"udp_multi_transmit_max_packet_serial": 32768
+}

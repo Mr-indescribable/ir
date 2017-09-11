@@ -1,0 +1,17 @@
+{
+	"server_addr": "192.168.122.164",
+	"server_tcp_port": 6040,
+	"server_udp_port": 6050,
+	"listen_addr": "127.0.0.1",
+	"listen_tcp_port": 60040,
+	"listen_udp_port": 60050,
+	"cipher_name": "aes-256-gcm",
+	"passwd": "An indescribable password",
+	"udp_socket_max_idle_time": 60,
+	"log_level": "info",
+	"crypto_libpath": "/usr/lib/libcrypto.so.1.1",
+	"udp_iv_change_rate": 0.001,
+	"udp_multi_remote": {"192.168.122.164": 6050, "192.168.122.23": 6050},
+	"udp_multi_transmit_times": 1,
+	"udp_multi_transmit_max_packet_serial": 32768
+}

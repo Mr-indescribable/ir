@@ -1,0 +1,27 @@
+*nat
+:PREROUTING ACCEPT [0:0]
+:INPUT ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+:POSTROUTING ACCEPT [0:0]
+:REDIRTEST - [0:0]
+
+
+-A REDIRTEST -d 0.0.0.0/8 -j RETURN
+-A REDIRTEST -d 10.0.0.0/8 -j RETURN
+-A REDIRTEST -d 127.0.0.0/8 -j RETURN
+-A REDIRTEST -d 169.254.0.0/16 -j RETURN
+-A REDIRTEST -d 172.16.0.0/12 -j RETURN
+-A REDIRTEST -d 224.0.0.0/4 -j RETURN
+-A REDIRTEST -d 240.0.0.0/4 -j RETURN
+
+#-A REDIRTEST -d 192.168.0.0/16 -j RETURN
+# my remote server's address is 192.168.122.164, it should be ignored.
+# Of course, it just for test, if your remote server is not in 192.168.0.0/16,
+# you should use the above one
+-A REDIRTEST -d 192.168.122.164/32 -j RETURN
+
+-A OUTPUT -p tcp -j REDIRTEST
+# redirect to local server's port
+-A REDIRTEST -p tcp -j REDIRECT --to-ports 60040
+
+COMMIT
