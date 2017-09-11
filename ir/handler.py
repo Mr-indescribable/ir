@@ -45,7 +45,8 @@ class TCPHandler():
         self._config = config
         self._is_local = is_local
         if self._is_local:
-            self._iv = os.urandom(32)
+            self._iv_len = self._config.get('iv_len') or 32
+            self._iv = os.urandom(self._iv_len)
             self._remote_ip = self._config.get('server_addr')
             self._remote_port = self._config.get('server_tcp_port')
             self._remote_af = (self._remote_ip, self._remote_port)
