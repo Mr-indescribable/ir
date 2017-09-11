@@ -8,12 +8,12 @@ from ir.tools import HashTools
 
 
 openssl_ciphers = {cipher: OpenSSLCryptor for cipher in\
-                                   OpenSSLCryptor.supported_cipher}
+                                   OpenSSLCryptor.supported_ciphers}
 supported_cipher = {}
 supported_cipher.update(openssl_ciphers)
 
 openssl_preload_func_map = {cipher: load_libcrypto for cipher in\
-                                   OpenSSLCryptor.supported_cipher}
+                                   OpenSSLCryptor.supported_ciphers}
 preload_funcs = {}
 preload_funcs.update(openssl_preload_func_map)
 

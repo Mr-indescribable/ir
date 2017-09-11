@@ -749,4 +749,4 @@ def test_udp_packet_make_and_parse():
 
 if __name__ == '__main__':
     test_tcp_fpacket_make_and_parse()
-    # test_udp_packet_make_and_parse()
+    test_udp_packet_make_and_parse()

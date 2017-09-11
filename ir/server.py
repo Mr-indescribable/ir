@@ -419,7 +419,3 @@ class SrcExclusiveItems():
     @property
     def Stages(self):
         return self.iv_mgr.Stages
-
-
-if __name__ == '__main__':
-    a = SrcExclusiveItems(True)

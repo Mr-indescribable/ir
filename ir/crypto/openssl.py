@@ -44,25 +44,25 @@ def new_cipher_ctx(cipher_name, key, iv, mod):
 class OpenSSLCryptor(object):
 
     buf_size = 2048
-    supported_cipher = ['aes-128-cfb',
-                        'aes-192-cfb',
-                        'aes-256-cfb',
-                        'aes-128-ofb',
-                        'aes-192-ofb',
-                        'aes-256-ofb',
-                        'aes-128-gcm',
-                        'aes-192-gcm',
-                        'aes-256-gcm',       # recommended
-                        'chacha20',
-                        'chacha20-poly1305',
-                        'idea-cfb',          # ultra slow
-                        'idea-ofb',          # ultra slow
-                        'rc4',
-                        'rc4-40',
-                        'rc4-hmac-md5']
+    supported_ciphers = ['aes-128-cfb',
+                         'aes-192-cfb',
+                         'aes-256-cfb',
+                         'aes-128-ofb',
+                         'aes-192-ofb',
+                         'aes-256-ofb',
+                         'aes-128-gcm',
+                         'aes-192-gcm',
+                         'aes-256-gcm',       # recommended
+                         'chacha20',
+                         'chacha20-poly1305',
+                         'idea-cfb',          # ultra slow
+                         'idea-ofb',          # ultra slow
+                         'rc4',
+                         'rc4-40',
+                         'rc4-hmac-md5']
 
     def __init__(self, cipher_name, key, iv, mod, libpath='libcrypto.so.1.1'):
-        if cipher_name not in self.supported_cipher:
+        if cipher_name not in self.supported_ciphers:
             raise Exception('cipher not supported')
 
         if not lib_loaded:
@@ -113,5 +113,5 @@ if __name__ == '__main__':
                 print('!!')
                 break
 
-    for method in OpenSSLCryptor.supported_cipher:
+    for method in OpenSSLCryptor.supported_ciphers:
         test(method)

@@ -455,6 +455,7 @@ class UDPHandler():
         self._destroyed = False
         if self._is_local:
             self._return_sock = self._create_return_sock()
+            self._iv_len = self._config.get('iv_len') or 32
             self._iv_change_rate = self._config.get('udp_iv_change_rate')
 
         if self._server._multi_transmit and not self._is_local:
@@ -502,12 +503,13 @@ class UDPHandler():
         if self._is_local:
             excl = self._server._excl
             if excl.stage in (excl.Stages.EXPECT_NEW_IV, excl.Stages.DONE):
-                max_ = int(1 / self._iv_change_rate)
-                if (not self._server.default_iv_changed or
-                        random.randint(0, max_) == 1):
-                    self._server.default_iv_changed = True
-                    iv = os.urandom(32)
-                    self._server._local_manage_iv(iv)
+                if self._iv_change_rate:
+                    max_ = int(1 / self._iv_change_rate)
+                    if (not self._server.default_iv_changed or
+                            random.randint(0, max_) == 1):
+                        self._server.default_iv_changed = True
+                        iv = os.urandom(self._iv_len)
+                        self._server._local_manage_iv(iv)
 
             if excl.todo == excl.Cmd.SEND_IV:
                 iv = excl.iv
