@@ -36,10 +36,13 @@ WAIT_STATUS_READWRITING = WAIT_STATUS_READING | WAIT_STATUS_WRITING
 
 class TCPHandler():
 
-    def __init__(self, server, local_conn, epoll, config, is_local):
+    def __init__(self, server, local_conn, src, epoll, config, is_local):
         self._dest_info_handled = False
         self._server = server
         self._local_conn = local_conn
+        self._local_conn.setsockopt(socket.SOL_TCP, socket.TCP_NODELAY, 1)
+        self._local_conn.setblocking(False)
+        self._src = src
         self._remote_conn = None
         self._epoll = epoll
         self._config = config
@@ -66,7 +69,6 @@ class TCPHandler():
         self._data_2_local_sock = []
         self._data_2_remote_sock = []
         self._destroyed = False
-        logging.debug('Created local socket, fd: %d' % self._local_conn.fileno())
 
     def _fd_2_conn(self, fd):
         if fd == self._local_conn.fileno():
@@ -93,7 +95,7 @@ class TCPHandler():
         addrs = socket.getaddrinfo('0.0.0.0', 0, 0, socket.SOCK_STREAM,
                                    socket.SOL_TCP)
         if len(addrs) == 0:
-            logging.error("getaddrinfo failed")
+            logging.error("[TCP create_remote_conn] getaddrinfo failed")
             return None
         af, socktype, proto, canname, sa = addrs[0]
         remote_sock = socket.socket(af, socktype, proto)
@@ -143,14 +145,14 @@ class TCPHandler():
                 self._data_2_remote_sock.append(data)
                 self._update_stream(STREAM_UP, WAIT_STATUS_WRITING)
             else:
-                logging.error('write_all_to_sock:unknown socket')
+                logging.error('[TCP write_all_to_sock] Unknown socket')
         else:
             if conn == self._local_conn:
                 self._update_stream(STREAM_DOWN, WAIT_STATUS_READING)
             elif conn == self._remote_conn:
                 self._update_stream(STREAM_UP, WAIT_STATUS_READING)
             else:
-                logging.error('write_all_to_sock:unknown socket')
+                logging.error('[TCP write_all_to_sock] Unknown socket')
         return True
 
     def _update_stream(self, stream, status):
@@ -236,6 +238,8 @@ class TCPHandler():
                                                 self._config
                                                 )
                 if not res['valid']:
+                    logging.info(
+                            '[TCP] Got invalid data from %s:%d' % self._src)
                     self.destroy()
                     return
                 data = res['data']
@@ -248,7 +252,8 @@ class TCPHandler():
             else:
                 data = self._cryptor.decrypt(data)
         self._data_2_remote_sock.append(data)
-        logging.debug('%dB to %s:%d, stored' % (len(data), *self._remote_af))
+        logging.debug('[TCP] %dB to %s:%d, stored' % (len(data),
+                                                      *self._remote_af))
 
         if not self._remote_conn:
             if self._is_local:
@@ -257,20 +262,20 @@ class TCPHandler():
                             "can't find config server_addr/server_tcp_port")
             else:
                 if not (self._remote_ip and self._remote_port):
-                    logging.info("got invalid dest info, do destroy")
+                    logging.info("[TCP] Got invalid dest info, do destroy")
                     self.destroy()
                     return
 
             self._remote_conn = self._create_remote_conn(self._remote_af)
             if not self._remote_conn:
-                logging.warn('cannot connect to %s:%d, do destroy' %\
-                                                        self._remote_af)
+                logging.warn('[TCP] Cannot connect to %s:%d, do destroy' %\
+                                                             self._remote_af)
                 self.destroy()
                 return
             if self._is_local:
-                logging.info('connected to %s:%d' % dest_af)
+                logging.info('[TCP] Connecting to %s:%d' % dest_af)
             else:
-                logging.info('connected to %s:%d' % self._remote_af)
+                logging.info('[TCP] Connecting to %s:%d' % self._remote_af)
 
             self._add_conn_to_poll(self._remote_conn,
                        select.EPOLLOUT | select.EPOLLRDHUP | select.EPOLLERR)
@@ -332,7 +337,7 @@ class TCPHandler():
         try:
             self._write_to_sock(data, self._local_conn)
         except Exception as e:
-            logging.debug('on_remote_read got error: %s. do destroy' % e)
+            logging.debug('[TCP write_to_sock] Got error: %s. do destroy' % e)
             self.destroy()
 
     def _on_local_write(self):
@@ -355,29 +360,28 @@ class TCPHandler():
             self._update_stream(STREAM_DOWN, WAIT_STATUS_READING)
 
     def _on_local_disconnect(self):
-        logging.debug('local socket got EPOLLRDHUP, do destroy()')
+        logging.info('[TCP] Local socket got EPOLLRDHUP, do destroy()')
         self.destroy()
 
     def _on_remote_disconnect(self):
-        logging.debug('remote socket got EPOLLRDHUP, do destroy()')
+        logging.info('[TCP] Remote socket got EPOLLRDHUP, do destroy()')
         self.destroy()
 
     def _on_local_error(self):
-        logging.warn('local socket got EPOLLERR, do destroy()')
+        logging.warn('[TCP] Local socket got EPOLLERR, do destroy()')
         self.destroy()
 
     def _on_remote_error(self):
-        logging.warn('remote socket got EPOLLERR, do destroy()')
+        logging.warn('[TCP] Remote socket got EPOLLERR, do destroy()')
         self.destroy()
 
     def handle_event(self, fd, evt):
-        logging.debug('handler handle event: %d, fd: %d' % (evt, fd))
         if self._destroyed:
-            logging.info('handler destroyed')
+            logging.info('[TCP] Handler destroyed')
             return
         conn = self._fd_2_conn(fd)
         if not conn:
-            logging.warn('unknow socket error, do destroy()')
+            logging.warn('[TCP] Unknow socket error, do destroy()')
             return
 
         if conn == self._remote_conn:
@@ -401,7 +405,7 @@ class TCPHandler():
 
     def destroy(self):
         if self._destroyed:
-            logging.warn('handler already destroyed')
+            logging.warn('[TCP] Handler already destroyed')
             return
 
         self._destroyed = True
@@ -410,15 +414,15 @@ class TCPHandler():
         self._epoll.unregister(loc_fd)
         self._local_conn.close()
         self._local_conn = None
-        logging.debug('local socket destroyed, fd: %d' % loc_fd)
+        logging.debug('[TCP] Local socket destroyed, fd: %d' % loc_fd)
         if hasattr(self, '_remote_conn') and self._remote_conn:
             rmt_fd = self._remote_conn.fileno()
             self._server._remove_handler(rmt_fd)
             self._epoll.unregister(rmt_fd)
             self._remote_conn.close()
             self._remote_conn = None
-            logging.debug('remote socket @ %s:%d destroyed, fd: %d' %\
-                            (self._remote_ip, self._remote_port, rmt_fd))
+            logging.info('[TCP] Remote socket @ %s:%d destroyed, fd: %d' %\
+                                (self._remote_ip, self._remote_port, rmt_fd))
 
     @property
     def destroyed(self):
@@ -469,12 +473,14 @@ class UDPHandler():
         addrs = socket.getaddrinfo('0.0.0.0', 0, 0, socket.SOCK_DGRAM,
                                    socket.SOL_UDP)
         if len(addrs) == 0:
-            logging.warn('failed to getaddrinfo @ %s:%d' % (dest[0], dest[1]))
+            logging.warn('[UDP] Failed to getaddrinfo @ %s:%d' % (dest[0],
+                                                                  dest[1]))
             return None
         af, socktype, proto, canname, sa = addrs[0]
         client_sock = socket.socket(af, socktype, proto)
         client_sock.setblocking(False)
-        logging.debug('created client socket fd: %d' % client_sock.fileno())
+        logging.debug(
+                '[UDP] created client socket fd: %d' % client_sock.fileno())
         return client_sock
 
     def _create_return_sock(self):
@@ -496,9 +502,6 @@ class UDPHandler():
             return False
         self.last_call_time = time.time()
         return True
-
-    def _get_current_cryptor(self):
-        return self._server._excl.current_cryptor
 
     def handle_local_recv(self, data):
         if self._is_local:
@@ -539,7 +542,8 @@ class UDPHandler():
             # UDPServer._server_sock_recv
             target = self._dest
         self._client_sock.sendto(data, target)
-        logging.debug('local_recv: sent %dB to %s:%d' % (len(data), *target))
+        logging.debug('[UDP local_recv] Sent %dB to %s:%d' % (len(data),
+                                                              *target))
 
     def handle_remote_resp(self):
         data, src = self._client_sock.recvfrom(UDP_BUFFER_SIZE)
@@ -548,7 +552,7 @@ class UDPHandler():
             cryptor = excl.current_cryptor
             res = PacketParser.parse_udp_packet(cryptor, data)
             if not res['valid']:
-                err_msg = 'Got invalid packet from %s:%d' % src
+                err_msg = '[UDP] Got invalid packet from %s:%d' % src
                 if not (excl.old_cryptor and cryptor != excl.old_cryptor):
                     logging.info(err_msg)
                     return
@@ -593,8 +597,8 @@ class UDPHandler():
                 return
             data = PacketMaker.make_udp_packet(cryptor, data, self._src, iv)
             self._server_sock.sendto(data, self._src)
-        logging.debug('remote_resp: sent %dB to %s:%d' % (len(data),
-                                                          *self._src))
+        logging.debug('[UDP remote_resp] Sent %dB to %s:%d' % (len(data),
+                                                               *self._src))
 
     def one_more_src(self, src):
         addr = src[0]
@@ -603,7 +607,7 @@ class UDPHandler():
 
     def destroy(self):
         if self._destroyed:
-            logging.warn('handler already destroyed')
+            logging.warn('[UDP] Handler already destroyed')
             return False
 
         self._destroyed = True
@@ -622,7 +626,7 @@ class UDPHandler():
             self._server._remove_handler(key=self._key)
         if self._server._multi_transmit and not self._is_local:
             self._server._remove_handler(src_port=self._src[1])
-        logging.debug('UDP handler destroyed')
+        logging.debug('[UDP] Handler destroyed')
         return True
 
     @property
@@ -660,8 +664,8 @@ class UDPMultiTransmitHandler():
     def _transmit(self, packet, sock, af_list):
         for af in af_list:
             for _ in range(self._transmit_times):
-                logging.debug('local_recv: sent %dB to %s:%d' %\
-                                                (len(packet), *af))
+                logging.debug('[UDP multi-transmit] sent %dB to %s:%d' %\
+                                                        (len(packet), *af))
                 sock.sendto(packet, af)
 
     def handle_local_transmit(self, packet, sock):

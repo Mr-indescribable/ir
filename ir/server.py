@@ -89,7 +89,7 @@ class TCPServer(ServerMixin):
                                    self._config.get('passwd'),
                                    self._config.get('crypto_libpath'),
                                    reset_mode=True)
-        logging.info('Initialized cipher with method: %s'\
+        logging.info('[TCP] Initialized cipher with method: %s'\
                                     % self._config.get('cipher_name'))
 
     def _init_socket(self, listen_addr=None, listen_port=None, so_backlog=1024):
@@ -104,7 +104,7 @@ class TCPServer(ServerMixin):
         sock.setblocking(False)
         sock.bind(sa)
         sock.listen(so_backlog)
-        logging.info('TCP server is listening at %s:%d' % (
+        logging.info('[TCP] Server is listening at %s:%d' % (
                                     self._config['listen_addr'],
                                     self._config['listen_tcp_port']))
         return sock
@@ -113,10 +113,10 @@ class TCPServer(ServerMixin):
         handler = self._fd_2_handler.get(fd)
         if fd == self._local_sock_fd and not handler:
             try:
-                conn, addr = self._local_sock.accept()
-                logging.info('accepted connection from %s:%d, fd: %d' %\
-                                                (*addr, conn.fileno()))
-                TCPHandler(self, conn, self._epoll,
+                conn, src = self._local_sock.accept()
+                logging.info('[TCP] Accepted connection from %s:%d, fd: %d' %\
+                                                        (*src, conn.fileno()))
+                TCPHandler(self, conn, src, self._epoll,
                            self._config, self._is_local)
             except (OSError, IOError) as e:
                 error_no = tools.errno_from_exception(e)
@@ -128,7 +128,7 @@ class TCPServer(ServerMixin):
             if handler:
                 handler.handle_event(fd, evt)
             else:
-                logging.warn('fd removed')
+                logging.warn('[TCP] fd removed')
 
 
 class UDPServer(ServerMixin):
@@ -170,7 +170,7 @@ class UDPServer(ServerMixin):
             sock.setsockopt(socket.SOL_IP, IP_TRANSPARENT, 1)
         sock.setblocking(False)
         sock.bind(sa)
-        logging.info('UDP server is listening at %s:%d' % (
+        logging.info('[UDP] Server is listening at %s:%d' % (
                                     self._config['listen_addr'],
                                     self._config['listen_udp_port']))
         return sock
@@ -180,7 +180,7 @@ class UDPServer(ServerMixin):
                           self._config.get('passwd'),
                           self._config.get('crypto_libpath'),
                           reset_mode=True)
-        logging.info('Initialized cipher with method: %s'\
+        logging.info('[UDP] Initialized cipher with method: %s'\
                                     % self._config.get('cipher_name'))
         self._excl = SrcExclusiveItems(self._is_local, cryptor)
 
@@ -191,7 +191,7 @@ class UDPServer(ServerMixin):
             if not self._is_local:
                 self._src_port_2_handler = {}
                 self._available_saddrs = self._config.get('udp_multi_source')
-            logging.info('UDP multi-transmit on.')
+            logging.info('[UDP] Multi-transmit on')
         else:
             self._multi_transmit = False
 
@@ -270,7 +270,7 @@ class UDPServer(ServerMixin):
             cryptor = self._excl.current_cryptor
             res = PacketParser.parse_udp_packet(cryptor, data)
             if not res['valid']:
-                err_msg = 'Got invalid packet from %s:%d' % src
+                err_msg = '[UDP] Got invalid packet from %s:%d' % src
                 if not (self._excl.old_cryptor and cryptor != self._excl.old_cryptor):
                     logging.info(err_msg)
                     return None, None, None
@@ -304,7 +304,7 @@ class UDPServer(ServerMixin):
     def handle_event(self, fd, evt):
         if fd == self._local_sock_fd:
             if evt & select.EPOLLERR:
-                logging.warn('UDP server socket got EPOLLERR')
+                logging.warn('[UDP] Server socket got EPOLLERR')
             elif evt & select.EPOLLIN:
                 data, src, dest = self._server_socket_recv()
                 if not dest:
@@ -312,7 +312,8 @@ class UDPServer(ServerMixin):
 
                 if self._multi_transmit and not self._is_local:
                     if src[0] not in self._available_saddrs:
-                        logging.info('Got request from unavailable source')
+                        logging.info(
+                                '[UDP] Got request from unavailable source')
                         return
 
                     handler = self._src_port_2_handler.get(src[1])
@@ -335,20 +336,21 @@ class UDPServer(ServerMixin):
                     handler.handle_local_recv(data)
         else:
             if evt & select.EPOLLERR:
-                logging.warn('UDP client socket got EPOLLERR')
+                logging.warn('[UDP] Client socket got EPOLLERR')
             elif evt & select.EPOLLIN:
                 handler = self._fd_2_handler.get(fd)
                 if handler:
                     # In most situation, upd_socket_max_idle_time will be
                     # a long time, such as 1 minute. It's vary rare that
-                    # a udp response takes 1 minute. If it happend, just
+                    # a udp response takes 1 minute. If it happened, just
                     # drop the packet.
                     if not handler.update_last_call_time():
-                        logging.info('response timeout, handler destroyed')
+                        logging.info(
+                                '[UDP] Response timeout, handler destroyed')
                         return
                     handler.handle_remote_resp()
                 else:
-                    logging.warn('fd removed')
+                    logging.warn('[UDP] fd removed')
 
 
 class ExpiredUDPSocketCleaner(Thread):
