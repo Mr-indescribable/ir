@@ -286,8 +286,7 @@ class UDPServer(ServerMixin):
             if self._multi_transmit:
                 res, is_duplicate = self._mth.handle_recv(res)
                 if is_duplicate:
-                    logging.debug(
-                            '[UDP multi-transmit] Dropped duplicate packet')
+                    logging.debug('[UDP_MT] Dropped duplicate packet')
                     return None, src, res['dest_af']
 
             # local lost the iv

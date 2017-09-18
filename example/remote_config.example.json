@@ -6,8 +6,10 @@
 	"passwd": "An indescribable password",
 	"udp_socket_max_idle_time": 60,
 	"log_level": "info",
-	"crypto_libpath": "/usr/lib/libcrypto.so.1.1",
+	"crypto_libpath": "/usr/local/lib64/libcrypto.so.1.1",
 	"udp_multi_source": ["192.168.122.171", "192.168.122.23"],
 	"udp_multi_transmit_times": 1,
-	"udp_multi_transmit_max_packet_serial": 32768
+	"udp_multi_transmit_max_packet_serial": 32768,
+	"udp_min_salt_len": 4,
+	"udp_max_salt_len": 32
 }

@@ -74,6 +74,10 @@ UDP Packet Format (before encrypt):
     +--------------------+-----------------------+
     |       field        |        byte(s)        |
     +--------------------+-----------------------+
+    |      SALT.LEN      |           1           |
+    +--------------------+-----------------------+
+    |        SALT        |       SALT.LEN        |
+    +--------------------+-----------------------+
     |      MAC.LEN       |           1           |
     +--------------------+-----------------------+
     |        MAC         |        MAC.LEN        |
@@ -245,6 +249,13 @@ UDP Comment:
 
 Field Description:
 
+    SALT.LEN:
+        The length of SALT.
+        Range: 0x00 - 0xFF
+
+    SALT:
+        Just salt.
+
     MAC.LEN:
         The length of MAC.
         Range: 0x00 - 0xFF
@@ -259,7 +270,7 @@ Field Description:
             md5(IV.LEN + IV + DEST.AF.LEN + DEST.AF)
 
         Calculation in UDP mode:
-            md5(SERIAL + TIME + IV.LEN + IV +\ 
+            md5(SALT.LEN + SALT + SERIAL + TIME + IV.LEN + IV +\ 
                 DEST.AF.LEN + DEST.AF + DATA.LEN + DATA)
 
     SERIAL:
@@ -346,7 +357,8 @@ class PacketMaker(object):
         return iv_len + iv + payload
 
     @classmethod
-    def make_udp_packet(cls, cryptor, data, dest_af, iv=b'', serial=0):
+    def make_udp_packet(cls, cryptor, data, dest_af, iv=b'', serial=0,
+                             time_=None, salt=b''):
         '''make a udp packet
 
         :param data: data from applications. Type: bytes
@@ -358,18 +370,21 @@ class PacketMaker(object):
         :rtype: bytes
         '''
 
-        time_ = int(time.time() * 10000000)
+        salt_len = struct.pack('B', len(salt))
+        time_ = time_ or int(time.time() * 10000000)
         serial = struct.pack('I', serial)
         time_ = struct.pack('L', time_)
         dest_af = cls.ipv4_af_2_bytes(dest_af)
         dest_af_len = struct.pack('B', len(dest_af))
         iv_len = struct.pack('B', len(iv))
         data_len = struct.pack('I', len(data))
-        r_data = serial + time_ + iv_len + iv + dest_af_len +\
-                    dest_af + data_len + data
-        mac = HashTools.md5(r_data).encode('utf-8')
+
+        head = salt_len + salt
+        tail = serial + time_ + iv_len + iv +\
+                dest_af_len + dest_af + data_len + data
+        mac = HashTools.md5(head + tail).encode('utf-8')
         mac_len = struct.pack('B', len(mac))
-        r_data = mac_len + mac + r_data
+        r_data = head + mac_len + mac + tail
         return cryptor.encrypt(r_data)
 
 
@@ -486,8 +501,9 @@ class PacketParser(object):
 
     @classmethod
     def auth_udp_packet(cls, data):
-        d = data['raw_serial'] + data['raw_time'] + data['raw_iv_len'] +\
-                data['iv'] + data['raw_dest_af_len'] + data['raw_dest_af'] +\
+        d = data['raw_salt_len'] + data['salt'] + data['raw_serial'] +\
+                data['raw_time'] + data['raw_iv_len'] + data['iv'] +\
+                data['raw_dest_af_len'] + data['raw_dest_af'] +\
                 data['raw_data_len'] + data['data']
         mac = HashTools.md5(d)
         if mac.encode('utf-8') == data['mac']:
@@ -504,6 +520,9 @@ class PacketParser(object):
         :rtype: dict
         :rstruct: {
                     'valid': bool,
+                    'raw_salt_len': bytes,
+                    'salt_len': int,
+                    'salt': bytes,
                     'raw_mac_len': bytes,
                     'mac_len': int,
                     'mac': bytes,
@@ -534,28 +553,39 @@ class PacketParser(object):
         # I need the raw data here, so I use this expression: raw_data[n: m]
         try:
             i = 0
+            raw_salt_len = raw_data[i: i + 1]
+            salt_len = struct.unpack('B', raw_salt_len)[0]
+            i += 1
+            salt = raw_data[i: i + salt_len]
+            i += salt_len
+
             raw_mac_len = raw_data[i: i + 1]
             mac_len = struct.unpack('B', raw_mac_len)[0]
             i += 1
             mac = raw_data[i: i + mac_len]
             i += mac_len
+
             raw_serial = raw_data[i: i + 4]
-            serial = struct.unpack('I', raw_serial)
+            serial = struct.unpack('I', raw_serial)[0]
             i += 4
+
             raw_time = raw_data[i: i + 8]
-            time_ = struct.unpack('L', raw_time)
+            time_ = struct.unpack('L', raw_time)[0]
             i += 8
+
             raw_iv_len = raw_data[i: i + 1]
             iv_len = struct.unpack('B', raw_iv_len)[0]
             i += 1
             iv = raw_data[i: i + iv_len]
             i += iv_len
+
             raw_dest_af_len = raw_data[i: i + 1]
             dest_af_len = struct.unpack('B', raw_dest_af_len)[0]
             i += 1
             raw_dest_af = raw_data[i: i + dest_af_len]
             dest_af = cls.bytes_2_ipv4_af(raw_dest_af)
             i += dest_af_len
+
             raw_data_len = raw_data[i: i + 4]
             data_len = struct.unpack('I', raw_data_len)[0]
             i += 4
@@ -567,6 +597,9 @@ class PacketParser(object):
 
         res = {
                 'valid': False,
+                'raw_salt_len': raw_salt_len,
+                'salt_len': salt_len,
+                'salt': salt,
                 'raw_mac_len': raw_mac_len,
                 'mac_len': mac_len,
                 'mac': mac,

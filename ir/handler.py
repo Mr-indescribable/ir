@@ -446,6 +446,8 @@ class UDPHandler():
         self._config = config
         self._is_local = is_local
         self._key = key
+        self._min_salt_len = config.get('udp_min_salt_len') or 4
+        self._max_salt_len = config.get('udp_max_salt_len') or 32
         if self._is_local:
             server_addr = config.get('server_addr')
             server_port = config.get('server_udp_port')
@@ -532,13 +534,12 @@ class UDPHandler():
 
             if self._server._multi_transmit:
                 serial = self._server._mth.next_serial()
-                data = PacketMaker.make_udp_packet(cryptor, data, self._dest,
-                                                   iv, serial)
-                self._server._mth.handle_local_transmit(data, self._client_sock)
+                self._server._mth.handle_transmit(self._client_sock, data,
+                                                  cryptor, self._dest, iv,
+                                                  serial)
                 return
 
-            data = PacketMaker.make_udp_packet(cryptor, data,
-                                               self._dest, iv)
+            data = PacketMaker.make_udp_packet(cryptor, data, self._dest, iv)
             target = self._remote_af
         else:
             # The first step I handle server socket's EPOLLIN event is
@@ -570,7 +571,7 @@ class UDPHandler():
                 res, is_duplicate = self._server._mth.handle_recv(res)
                 if is_duplicate:
                     logging.debug(
-                            '[UDP multi-transmit] Dropped duplicate packet')
+                            '[UDP_MT] Dropped duplicate packet')
                     return
             decrypted_by_nc = cryptor == excl.nc_in_progress
             iv = res['iv']
@@ -592,17 +593,15 @@ class UDPHandler():
 
             if self._server._multi_transmit:
                 serial = self._server._mth.next_serial()
-                data = PacketMaker.make_udp_packet(cryptor, data, self._dest,
-                                                   iv, serial)
                 af_list = [(addr, self._src_port) for addr in self._src_addrs]
-                self._server._mth.handle_remote_return(data,
-                                                       self._server_sock,
-                                                       af_list)
+                self._server._mth.handle_transmit(self._server_sock, data,
+                                                  cryptor, self._dest, iv,
+                                                  serial, af_list)
                 return
             data = PacketMaker.make_udp_packet(cryptor, data, self._src, iv)
             self._server_sock.sendto(data, self._src)
-        logging.debug('[UDP remote_resp] Sent %dB to %s:%d' % (len(data),
-                                                               *self._src))
+        logging.debug(
+                '[UDP remote_resp] Sent %dB to %s:%d' % (len(data), *self._src))
 
     def one_more_src(self, src):
         addr = src[0]
@@ -643,6 +642,8 @@ class UDPMultiTransmitHandler():
     def __init__(self, config, is_local):
         self._config = config
         self._is_local = is_local
+        self._min_salt_len = config.get('udp_min_salt_len') or 4
+        self._max_salt_len = config.get('udp_max_salt_len') or 32
 
         if self._is_local:
             multi_remote = config.get('udp_multi_remote')
@@ -665,23 +666,25 @@ class UDPMultiTransmitHandler():
         self.serial += 1
         return self.serial
 
-    def _transmit(self, packet, sock, af_list):
-        for af in af_list:
-            for _ in range(self._transmit_times):
-                logging.debug('[UDP multi-transmit] sent %dB to %s:%d' %\
-                                                        (len(packet), *af))
-                sock.sendto(packet, af)
-
-    def handle_local_transmit(self, packet, sock):
+    def handle_transmit(self, sock, data, cryptor, dest,
+                              iv, serial, af_list=None):
         '''do udp multi-transmit
 
         :param packet: the formated and encrypted udp packet
         :param sock: the client_socket
         '''
-        self._transmit(packet, sock, self._server_af_list)
 
-    def handle_remote_return(self, packet, sock, af_list):
-        self._transmit(packet, sock, af_list)
+        af_list = af_list or self._server_af_list
+        for af in af_list:
+            time_ = int(time.time() * 10000000)
+            salt_len = random.randint(self._min_salt_len, self._max_salt_len)
+            salt = os.urandom(salt_len)
+            packet = PacketMaker.make_udp_packet(cryptor, data, dest, iv,
+                                                 serial, time_, salt)
+            for _ in range(self._transmit_times):
+                sock.sendto(packet, af)
+            logging.debug('[UDP_MT] sent %dB to %s:%d, times: %d' %\
+                                (len(packet), *af, self._transmit_times))
 
     def handle_recv(self, packet):
         '''call this function after parsed a packet in multi-transmit mode
@@ -691,10 +694,10 @@ class UDPMultiTransmitHandler():
         '''
 
         serial = packet['serial']
-        mac = packet['mac']
-        if self._cache.cached(serial, mac):
+        digest = tools.HashTools.md5(packet['data'])
+        if self._cache.cached(serial, digest):
             return packet, True
-        self._cache.append(serial, mac)
+        self._cache.append(serial, digest)
         return packet, False
 
 
