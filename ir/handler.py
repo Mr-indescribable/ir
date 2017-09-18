@@ -53,6 +53,7 @@ class TCPHandler():
             self._remote_ip = self._config.get('server_addr')
             self._remote_port = self._config.get('server_tcp_port')
             self._remote_af = (self._remote_ip, self._remote_port)
+            self._dest_af = None
             self._cryptor = Cryptor(self._config.get('cipher_name'),
                                     self._config.get('passwd'),
                                     self._config.get('crypto_libpath'),
@@ -221,9 +222,9 @@ class TCPHandler():
             # send dest address add port to remote in the first packet
             # every handler only have 1 dest, so we need to do it 1 time
             if not self._dest_info_handled:
-                dest_af = self._local_get_dest_af()
+                self._dest_af = self._local_get_dest_af()
                 data = PacketMaker.make_tcp_fpacket(
-                                                data, dest_af,
+                                                data, self._dest_af,
                                                 self._iv, self._cryptor,
                                                 self._server._iv_cryptor
                                                 )
@@ -273,7 +274,7 @@ class TCPHandler():
                 self.destroy()
                 return
             if self._is_local:
-                logging.info('[TCP] Connecting to %s:%d' % dest_af)
+                logging.info('[TCP] Connecting to %s:%d' % self._dest_af)
             else:
                 logging.info('[TCP] Connecting to %s:%d' % self._remote_af)
 
@@ -421,8 +422,11 @@ class TCPHandler():
             self._epoll.unregister(rmt_fd)
             self._remote_conn.close()
             self._remote_conn = None
-            logging.info('[TCP] Remote socket @ %s:%d destroyed, fd: %d' %\
-                                (self._remote_ip, self._remote_port, rmt_fd))
+            if self._is_local:
+                af = self._dest_af
+            else:
+                af = self._remote_af
+            logging.info('[TCP] Remote socket @ %s:%d destroyed' % af)
 
     @property
     def destroyed(self):
