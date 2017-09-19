@@ -666,20 +666,33 @@ class UDPMultiTransmitHandler():
         self.serial += 1
         return self.serial
 
-    def handle_transmit(self, sock, data, cryptor, dest,
+    def handle_transmit(self, sock, data, cryptor, dest_af,
                               iv, serial, af_list=None):
         '''do udp multi-transmit
 
-        :param packet: the formated and encrypted udp packet
-        :param sock: the client_socket
+        :param sock: just the socket
+        :param data: raw data for apps 
+        :param cryptor: Cryptor instance
+        :param dest_af: address and port of destination. structure: (ip, port)
+        :param iv: iv to send, type: bytes
+        :param serial: serial number of packet. type: int
+        :param af_list: server address list,
+                        use self._server_af_list instead if not provided.
+                        structure: [(ip, port), (ip, port)]
         '''
 
         af_list = af_list or self._server_af_list
+        time_ = int(time.time() * 10000000)
+        salt_len = None
+        last_salt_len = None
         for af in af_list:
-            time_ = int(time.time() * 10000000)
-            salt_len = random.randint(self._min_salt_len, self._max_salt_len)
+            while salt_len == last_salt_len:
+                salt_len = random.randint(self._min_salt_len,
+                                          self._max_salt_len)
+            last_salt_len = salt_len
+
             salt = os.urandom(salt_len)
-            packet = PacketMaker.make_udp_packet(cryptor, data, dest, iv,
+            packet = PacketMaker.make_udp_packet(cryptor, data, dest_af, iv,
                                                  serial, time_, salt)
             for _ in range(self._transmit_times):
                 sock.sendto(packet, af)

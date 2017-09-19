@@ -57,6 +57,21 @@ def test_iv_all_cipher():
         test_iv(cn)
 
 
+def test_stream():
+    c = Cryptor('aes-256-gcm', 'PWDDDDDDDDDDD', 'libcrypto.so.1.1',
+                iv=os.urandom(32), reset_mode=True)
+    st0 = b'aaaaa'
+    st1 = b'bbbbbbbbbbbbb'
+    t = b'1234567890-asdfg'
+    a = c.encrypt(st0 + t)
+    b = c.encrypt(st1 + t)
+    print(a)
+    print('\n--------------------\n')
+    print(b)
+
+
 if __name__ == '__main__':
-    test_cryptor_reset_all_cipher()
-    test_iv_all_cipher()
+    # test_cryptor_reset_all_cipher()
+    # test_iv_all_cipher()
+
+    test_stream()
