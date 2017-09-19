@@ -82,12 +82,11 @@ class TCPHandler():
         self._epoll.register(conn.fileno(), mode)
         self._server._add_handler(conn.fileno(), self)
 
-    def _get_sock_opt(self, conn):
-        opt = conn.getsockopt(socket.SOL_IP, SO_ORIGINAL_DST, SO_ADDR_SIZE)
-        return tools.unpack_sockopt(opt)
-
     def _local_get_dest_af(self):
-        dest_info = self._get_sock_opt(self._local_conn)[1:]
+        opt = self._local_conn.getsockopt(socket.SOL_IP,
+                                          SO_ORIGINAL_DST,
+                                          SO_ADDR_SIZE)
+        dest_info = tools.unpack_sockopt(opt)[1:]
         port = dest_info[0]
         ip = '.'.join([str(u) for u in dest_info[1:]])
         return (ip, port)
@@ -215,7 +214,7 @@ class TCPHandler():
                                                  errno.EWOULDBLOCK):
                 return
         if not data:
-            self.destroy()
+            logging.info('[TCP] Local socket got null data')
             return
 
         if self._is_local:
