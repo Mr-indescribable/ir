@@ -706,7 +706,7 @@ class UDPMultiTransmitHandler():
         '''
 
         serial = packet['serial']
-        digest = tools.HashTools.md5(packet['data'])
+        digest = tools.HashTools.smd5(packet['data'])
         if self._cache.cached(serial, digest):
             return packet, True
         self._cache.append(serial, digest)

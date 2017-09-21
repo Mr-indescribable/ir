@@ -29,3 +29,7 @@
   * [ir.handler.TCPHandler.\_on\_remote\_write](https://github.com/Mr-indescribable/some-tools/blob/indescribable/ir/ir/handler.py#L281)
   * [ir.handler.TCPHandler.\_on\_remote\_read](https://github.com/Mr-indescribable/some-tools/blob/indescribable/ir/ir/handler.py#L300)
   * [ir.handler.TCPHandler.\_on\_local\_write](https://github.com/Mr-indescribable/some-tools/blob/indescribable/ir/ir/handler.py#L337)
+
+----------------------------
+
+> I don't need security, I need network quality.

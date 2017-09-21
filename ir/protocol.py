@@ -348,7 +348,7 @@ class PacketMaker(object):
         dest_af = cls.ipv4_af_2_bytes(dest_af)
         dest_af_len = struct.pack('B', len(dest_af))
         tmp = iv_len + iv + dest_af_len + dest_af
-        mac = HashTools.md5(tmp).encode('utf-8')
+        mac = HashTools.smd5(tmp).encode('utf-8')
         mac_len = struct.pack('B', len(mac))
         payload = mac_len + mac + dest_af_len + dest_af + data
         payload = cryptor.encrypt(payload)
@@ -382,7 +382,7 @@ class PacketMaker(object):
         head = salt_len + salt
         tail = serial + time_ + iv_len + iv +\
                 dest_af_len + dest_af + data_len + data
-        mac = HashTools.md5(head + tail).encode('utf-8')
+        mac = HashTools.smd5(head + tail).encode('utf-8')
         mac_len = struct.pack('B', len(mac))
         r_data = head + mac_len + mac + tail
         return cryptor.encrypt(r_data)
@@ -406,7 +406,7 @@ class PacketParser(object):
     def auth_tcp_fpacket(cls, data):
         tmp = data['raw_iv_len'] + data['iv'] +\
                 data['raw_dest_af_len'] + data['raw_dest_af']
-        mac = HashTools.md5(tmp).encode('utf-8')
+        mac = HashTools.smd5(tmp).encode('utf-8')
         if mac == data['mac']:
             return True
         return False
@@ -505,7 +505,7 @@ class PacketParser(object):
                 data['raw_time'] + data['raw_iv_len'] + data['iv'] +\
                 data['raw_dest_af_len'] + data['raw_dest_af'] +\
                 data['raw_data_len'] + data['data']
-        mac = HashTools.md5(d)
+        mac = HashTools.smd5(d)
         if mac.encode('utf-8') == data['mac']:
             return True
         return False

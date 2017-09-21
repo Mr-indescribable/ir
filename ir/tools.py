@@ -64,6 +64,10 @@ class HashTools(object):
         return cls._hash('md5', data)
 
     @classmethod
+    def smd5(cls, data):
+        return cls._hash('md5', data)[8:24]
+
+    @classmethod
     def sha1(cls, data):
         return cls._hash('sha1', data)
 
