@@ -7,7 +7,7 @@
 
 #### Who need this?
 
-+ The BEEEEEEP BEEEEEEP BEEEEEEEEP Chinese BEEEEPs. (Yeah, such as me.
++ Chinese Steam users. (Yeah, such as me.
 
 #### Supported platform
 
