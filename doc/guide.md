@@ -30,6 +30,8 @@ ir的启动脚本并没有提供daemon模式，后台运行需要借助其它工
 |L&R|      udp\_socket\_max\_idle\_time       |                     UDP socket最大闲置时间，过期销毁                  |
 |L&R|               log\_level                |       日志级别，支持的选项有：debug, info, warn, warning, error       |
 |L&R|            crypto\_libpath              |                             加密库所在路径                            |
+|L&R|          udp\_min\_salt\_len            |                    指定UDP包头中salt随机长度的最小值                  |
+|L&R|          udp\_max\_salt\_len            |                    指定UDP包头中salt随机长度的最大值                  |
 | L |                iv\_len                  |                               指定IV长度                              |
 | L |        udp\_iv\_change\_rate            |                          UDP通信中的IV变更机率                        |
 | L |          udp\_multi\_remote             |       UDP多线路，多个远程服务器。格式：{ip0: port0, ip1: port1}       |
