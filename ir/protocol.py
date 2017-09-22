@@ -94,7 +94,7 @@ UDP Packet Format (before encrypt):
     +--------------------+-----------------------+
     |      DEST.AF       |      DEST.AF.LEN      |
     +--------------------+-----------------------+
-    |     DATA.LEN       |           4           |
+    |     DATA.LEN       |           2           |
     +--------------------+-----------------------+
     |       DATA         |       DATA.LEN        |
     +--------------------+-----------------------+
@@ -310,7 +310,7 @@ Field Description:
 
     DATA.LEN:
         The length of DATA.
-        Range: 0x00000000 - 0xFFFFFFFF
+        Range: 0x0000 - 0xFFFF
 
     DATA:
         The data from applications that we need to transport.
@@ -377,7 +377,7 @@ class PacketMaker(object):
         dest_af = cls.ipv4_af_2_bytes(dest_af)
         dest_af_len = struct.pack('B', len(dest_af))
         iv_len = struct.pack('B', len(iv))
-        data_len = struct.pack('I', len(data))
+        data_len = struct.pack('H', len(data))
 
         head = salt_len + salt
         tail = serial + time_ + iv_len + iv +\
@@ -586,9 +586,9 @@ class PacketParser(object):
             dest_af = cls.bytes_2_ipv4_af(raw_dest_af)
             i += dest_af_len
 
-            raw_data_len = raw_data[i: i + 4]
-            data_len = struct.unpack('I', raw_data_len)[0]
-            i += 4
+            raw_data_len = raw_data[i: i + 2]
+            data_len = struct.unpack('H', raw_data_len)[0]
+            i += 2
             data = raw_data[i: i + data_len]
         except Exception:
             # a valid packet won't make any error
