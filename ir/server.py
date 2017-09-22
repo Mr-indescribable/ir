@@ -1,6 +1,7 @@
 #!/usr/bin/python3.6
 # coding: utf-8
 
+import sys
 import errno
 import logging
 import select
@@ -97,6 +98,9 @@ class TCPServer(ServerMixin):
         listen_port = listen_port or self._config['listen_tcp_port']
         addr_info = socket.getaddrinfo(listen_addr, listen_port, 0,
                                        socket.SOCK_STREAM, socket.SOL_TCP)
+        if len(addr_info) == 0:
+            logging.error('[TCP] getaddrinfo failed in TCPServer._init_socket')
+            sys.exit(1)
         af, stype, proto, canname, sa = addr_info[0]
         sock = socket.socket(af, stype, proto)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -163,8 +167,12 @@ class UDPServer(ServerMixin):
         listen_port = listen_port or self._config['listen_udp_port']
         addr_info = socket.getaddrinfo(listen_addr, listen_port, 0,
                                        socket.SOCK_DGRAM, socket.SOL_UDP)
+        if len(addr_info) == 0:
+            logging.error('[UDP] getaddrinfo failed in UDPServer._init_socket')
+            sys.exit(1)
         af, stype, proto, canname, sa = addr_info[0]
         sock = socket.socket(af, stype, proto)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         if self._is_local:
             sock.setsockopt(socket.SOL_IP, IP_RECVORIGDSTADDR, 1)
             sock.setsockopt(socket.SOL_IP, IP_TRANSPARENT, 1)

@@ -92,15 +92,9 @@ class TCPHandler():
         return (ip, port)
 
     def _create_remote_conn(self, remote_af):
-        addrs = socket.getaddrinfo('0.0.0.0', 0, 0, socket.SOCK_STREAM,
-                                   socket.SOL_TCP)
-        if len(addrs) == 0:
-            logging.error("[TCP create_remote_conn] getaddrinfo failed")
-            return None
-        af, socktype, proto, canname, sa = addrs[0]
-        remote_sock = socket.socket(af, socktype, proto)
-        remote_sock.setsockopt(socket.SOL_TCP, socket.TCP_NODELAY, 1)
+        remote_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         remote_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        remote_sock.setsockopt(socket.SOL_TCP, socket.TCP_NODELAY, 1)
         remote_sock.setblocking(False)
         remote_sock.bind(('0.0.0.0', 0))
         try:
@@ -473,19 +467,12 @@ class UDPHandler():
             self._src_port = src[1]
 
     def _create_client_sock(self):
-        dest = self._dest
-        # set port as 0, then OS will pick a random available port
-        addrs = socket.getaddrinfo('0.0.0.0', 0, 0, socket.SOCK_DGRAM,
-                                   socket.SOL_UDP)
-        if len(addrs) == 0:
-            logging.warn('[UDP] Failed to getaddrinfo @ %s:%d' % (dest[0],
-                                                                  dest[1]))
-            return None
-        af, socktype, proto, canname, sa = addrs[0]
-        client_sock = socket.socket(af, socktype, proto)
+        client_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        client_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         client_sock.setblocking(False)
-        logging.debug(
-                '[UDP] created client socket fd: %d' % client_sock.fileno())
+        client_sock.bind(('0.0.0.0', 0))
+        fd = client_sock.fileno()
+        logging.debug('[UDP] created client socket fd: %d' % fd)
         return client_sock
 
     def _create_return_sock(self):
