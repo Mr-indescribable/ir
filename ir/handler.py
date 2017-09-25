@@ -37,16 +37,21 @@ WAIT_STATUS_READWRITING = WAIT_STATUS_READING | WAIT_STATUS_WRITING
 class TCPHandler():
 
     def __init__(self, server, local_conn, src, epoll, config, is_local):
-        self._dest_info_handled = False
         self._server = server
         self._local_conn = local_conn
         self._local_conn.setsockopt(socket.SOL_TCP, socket.TCP_NODELAY, 1)
         self._local_conn.setblocking(False)
         self._src = src
-        self._remote_conn = None
         self._epoll = epoll
         self._config = config
         self._is_local = is_local
+        self._data_2_local_sock = []
+        self._data_2_remote_sock = []
+        self._remote_conn = None
+        self._remote_connected = False
+        self._local_connected = False
+        self._fpacket_handled = False
+        self._destroyed = False
         if self._is_local:
             self._iv_len = self._config.get('iv_len') or 32
             self._iv = os.urandom(self._iv_len)
@@ -63,13 +68,12 @@ class TCPHandler():
             self._remote_port = None
             self._remote_af = None
             self._cryptor = None
-        self._upstream_status = WAIT_STATUS_READING
-        self._downstream_status = WAIT_STATUS_INIT
-        self._add_conn_to_poll(self._local_conn,
-                       select.EPOLLIN | select.EPOLLRDHUP | select.EPOLLERR)
-        self._data_2_local_sock = []
-        self._data_2_remote_sock = []
-        self._destroyed = False
+        events = select.EPOLLIN | select.EPOLLOUT |\
+                    select.EPOLLRDHUP | select.EPOLLERR
+        self._add_conn_to_poll(self._local_conn, events)
+        if self._is_local:
+            self._handle_fpacket()
+            self._fpacket_handled = True
 
     def _fd_2_conn(self, fd):
         if fd == self._local_conn.fileno():
@@ -106,6 +110,18 @@ class TCPHandler():
                 return None
         return remote_sock
 
+    def _mark_remote_connected(self):
+        if hasattr(self, '_remote_conn'):
+            self._remote_connected = True
+            events = select.EPOLLIN | select.EPOLLRDHUP | select.EPOLLERR
+            self._epoll.modify(self._remote_conn.fileno(), events)
+
+    def _mark_local_connected(self):
+        if hasattr(self, '_local_conn'):
+            self._local_connected = True
+            events = select.EPOLLIN | select.EPOLLRDHUP | select.EPOLLERR
+            self._epoll.modify(self._local_conn.fileno(), events)
+
     def _write_to_sock(self, data, conn):
         # This function is copied from
         #      shadowsocks.tcprelay.TCPRelayHandler._write_to_sock
@@ -116,7 +132,7 @@ class TCPHandler():
         # https://www.apache.org/licenses/LICENSE-2.0
 
         if not data or not conn:
-            return False
+            return
         uncomplete = False
         try:
             l = len(data)
@@ -130,60 +146,67 @@ class TCPHandler():
                 uncomplete = True
             else:
                 self.destroy()
-                return False
+                return
         if uncomplete:
             if conn == self._local_conn:
                 self._data_2_local_sock.append(data)
-                self._update_stream(STREAM_DOWN, WAIT_STATUS_WRITING)
             elif conn == self._remote_conn:
                 self._data_2_remote_sock.append(data)
-                self._update_stream(STREAM_UP, WAIT_STATUS_WRITING)
-            else:
-                logging.error('[TCP write_all_to_sock] Unknown socket')
+
+    def _handle_fpacket(self, data=b''):
+        if self._is_local:
+            self._dest_af = self._local_get_dest_af()
+            data = PacketMaker.make_tcp_fpacket(
+                                            data, self._dest_af,
+                                            self._iv, self._cryptor,
+                                            self._server._iv_cryptor
+                                            )
         else:
-            if conn == self._local_conn:
-                self._update_stream(STREAM_DOWN, WAIT_STATUS_READING)
-            elif conn == self._remote_conn:
-                self._update_stream(STREAM_UP, WAIT_STATUS_READING)
-            else:
-                logging.error('[TCP write_all_to_sock] Unknown socket')
-        return True
+            res = PacketParser.parse_tcp_fpacket(
+                                            data,
+                                            self._server._iv_cryptor,
+                                            self._config
+                                            )
+            if not res['valid']:
+                logging.info(
+                        '[TCP] Got invalid data from %s:%d' % self._src)
+                self.destroy()
+                return
+            data = res['data']
+            self._remote_af = res['dest_af']
+            self._remote_ip = self._remote_af[0]
+            self._remote_port = self._remote_af[1]
+            self._cryptor = res['cryptor']
+            self._iv = res['iv']
+        if len(data) > 0:
+            self._data_2_remote_sock.append(data)
+        logging.debug('[TCP] %dB to %s:%d, stored' % (len(data),
+                                                      *self._remote_af))
 
-    def _update_stream(self, stream, status):
-        # This function is copied from
-        #      shadowsocks.tcprelay.TCPRelayHandler._update_stream
-        # I made some change to fit my project.
+        if self._is_local:
+            if not (self._remote_ip and self._remote_port):
+                raise ValueError(
+                        "Invalid configuration: server_addr/server_tcp_port")
+        else:
+            if not (self._remote_ip and self._remote_port):
+                logging.info("[TCP] Got invalid dest info, do destroy")
+                self.destroy()
+                return
 
-        # Copyright 2013-2015 clowwindy
-        # Licensed under the Apache License, Version 2.0
-        # https://www.apache.org/licenses/LICENSE-2.0
-
-        dirty = False
-        if stream == STREAM_DOWN:
-            if self._downstream_status != status:
-                self._downstream_status = status
-                dirty = True
-        elif stream == STREAM_UP:
-            if self._upstream_status != status:
-                self._upstream_status = status
-                dirty = True
-        if not dirty:
+        self._remote_conn = self._create_remote_conn(self._remote_af)
+        if not self._remote_conn:
+            logging.warn('[TCP] Cannot connect to %s:%d, do destroy' %\
+                                                         self._remote_af)
+            self.destroy()
             return
+        if self._is_local:
+            logging.info('[TCP] Connecting to %s:%d' % self._dest_af)
+        else:
+            logging.info('[TCP] Connecting to %s:%d' % self._remote_af)
 
-        if self._local_conn:
-            event = select.EPOLLRDHUP | select.EPOLLERR
-            if self._downstream_status & WAIT_STATUS_WRITING:
-                event |= select.EPOLLOUT
-            if self._upstream_status & WAIT_STATUS_READING:
-                event |= select.EPOLLIN
-            self._epoll.modify(self._local_conn.fileno(), event)
-        if self._remote_conn:
-            event = select.EPOLLRDHUP | select.EPOLLERR
-            if self._downstream_status & WAIT_STATUS_READING:
-                event |= select.EPOLLIN
-            if self._upstream_status & WAIT_STATUS_WRITING:
-                event |= select.EPOLLOUT
-            self._epoll.modify(self._remote_conn.fileno(), event)
+        events = select.EPOLLIN | select.EPOLLOUT |\
+                    select.EPOLLRDHUP | select.EPOLLERR
+        self._add_conn_to_poll(self._remote_conn, events)
 
     def _on_local_read(self):
         # This functuion is copied from
@@ -212,70 +235,19 @@ class TCPHandler():
             return
 
         if self._is_local:
-            # send dest address add port to remote in the first packet
-            # every handler only have 1 dest, so we need to do it 1 time
-            if not self._dest_info_handled:
-                self._dest_af = self._local_get_dest_af()
-                data = PacketMaker.make_tcp_fpacket(
-                                                data, self._dest_af,
-                                                self._iv, self._cryptor,
-                                                self._server._iv_cryptor
-                                                )
-                self._dest_info_handled = True
-            else:
-                data = self._cryptor.encrypt(data)
+            data = self._cryptor.encrypt(data)
         else:
-            if not self._dest_info_handled:
-                res = PacketParser.parse_tcp_fpacket(
-                                                data,
-                                                self._server._iv_cryptor,
-                                                self._config
-                                                )
-                if not res['valid']:
-                    logging.info(
-                            '[TCP] Got invalid data from %s:%d' % self._src)
-                    self.destroy()
-                    return
-                data = res['data']
-                self._remote_af = res['dest_af']
-                self._remote_ip = self._remote_af[0]
-                self._remote_port = self._remote_af[1]
-                self._cryptor = res['cryptor']
-                self._iv = res['iv']
-                self._dest_info_handled = True
+            if not self._fpacket_handled:
+                self._handle_fpacket(data)
+                self._fpacket_handled = True
+                return
             else:
                 data = self._cryptor.decrypt(data)
         self._data_2_remote_sock.append(data)
-        logging.debug('[TCP] %dB to %s:%d, stored' % (len(data),
-                                                      *self._remote_af))
+        logging.debug(
+                '[TCP] %dB to %s:%d, stored' % (len(data), *self._remote_af))
 
-        if not self._remote_conn:
-            if self._is_local:
-                if not (self._remote_ip and self._remote_port):
-                    raise ValueError(
-                            "can't find config server_addr/server_tcp_port")
-            else:
-                if not (self._remote_ip and self._remote_port):
-                    logging.info("[TCP] Got invalid dest info, do destroy")
-                    self.destroy()
-                    return
-
-            self._remote_conn = self._create_remote_conn(self._remote_af)
-            if not self._remote_conn:
-                logging.warn('[TCP] Cannot connect to %s:%d, do destroy' %\
-                                                             self._remote_af)
-                self.destroy()
-                return
-            if self._is_local:
-                logging.info('[TCP] Connecting to %s:%d' % self._dest_af)
-            else:
-                logging.info('[TCP] Connecting to %s:%d' % self._remote_af)
-
-            self._add_conn_to_poll(self._remote_conn,
-                       select.EPOLLOUT | select.EPOLLRDHUP | select.EPOLLERR)
-            self._update_stream(STREAM_UP, WAIT_STATUS_READWRITING)
-            self._update_stream(STREAM_DOWN, WAIT_STATUS_READING)
-        else:
+        if self._remote_connected:
             self._on_remote_write()
 
     def _on_remote_write(self):
@@ -294,8 +266,6 @@ class TCPHandler():
             data = b''.join(self._data_2_remote_sock)
             self._data_2_remote_sock = []
             self._write_to_sock(data, self._remote_conn)
-        else:
-            self._update_stream(STREAM_UP, WAIT_STATUS_READING)
 
     def _on_remote_read(self):
         # This function is copied from
@@ -321,18 +291,18 @@ class TCPHandler():
                                                  errno.EWOULDBLOCK):
                 return
         if not data:
-            self.destroy()
+            logging.info('[TCP] Remote socket got null data')
             return
 
         if self._is_local:
             data = self._cryptor.decrypt(data)
         else:
             data = self._cryptor.encrypt(data)
-        try:
-            self._write_to_sock(data, self._local_conn)
-        except Exception as e:
-            logging.debug('[TCP write_to_sock] Got error: %s. do destroy' % e)
-            self.destroy()
+        self._data_2_local_sock.append(data)
+        logging.debug('[TCP] %dB to %s:%d, stored' % (len(data), *self._src))
+
+        if self._local_connected:
+            self._on_local_write()
 
     def _on_local_write(self):
         # This function is copied from
@@ -350,8 +320,6 @@ class TCPHandler():
             data = b''.join(self._data_2_local_sock)
             self._data_2_local_sock = []
             self._write_to_sock(data, self._local_conn)
-        else:
-            self._update_stream(STREAM_DOWN, WAIT_STATUS_READING)
 
     def _on_local_disconnect(self):
         logging.info('[TCP] Local socket got EPOLLRDHUP, do destroy()')
@@ -384,8 +352,12 @@ class TCPHandler():
             if evt & select.EPOLLERR:
                 self._on_remote_error()
             if evt & (select.EPOLLIN | select.EPOLLHUP):
+                if not self._remote_connected:
+                    self._mark_remote_connected()
                 self._on_remote_read()
             if evt & select.EPOLLOUT:
+                if not self._remote_connected:
+                    self._mark_remote_connected()
                 self._on_remote_write()
         elif conn == self._local_conn:
             if evt & select.EPOLLRDHUP:
@@ -393,8 +365,12 @@ class TCPHandler():
             if evt & select.EPOLLERR:
                 self._on_local_error()
             if evt & (select.EPOLLIN | select.EPOLLHUP):
+                if not self._local_connected:
+                    self._mark_local_connected()
                 self._on_local_read()
             if evt & select.EPOLLOUT:
+                if not self._local_connected:
+                    self._mark_local_connected()
                 self._on_local_write()
 
     def destroy(self):
