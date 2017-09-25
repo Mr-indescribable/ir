@@ -66,7 +66,6 @@ class ServerMixin(object):
         try:
             while self.__running:
                 events = self._epoll.poll(POLL_TIMEOUT)
-                logging.debug('got event from epoll: %s' % str(events))
                 for fd, evt in events:
                     self.handle_event(fd, evt)
         except KeyboardInterrupt:

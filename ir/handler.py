@@ -105,14 +105,10 @@ class TCPHandler():
     def _mark_remote_connected(self):
         if hasattr(self, '_remote_conn'):
             self._remote_connected = True
-            events = select.EPOLLIN | select.EPOLLRDHUP | select.EPOLLERR
-            self._epoll.modify(self._remote_conn.fileno(), events)
 
     def _mark_local_connected(self):
         if hasattr(self, '_local_conn'):
             self._local_connected = True
-            events = select.EPOLLIN | select.EPOLLRDHUP | select.EPOLLERR
-            self._epoll.modify(self._local_conn.fileno(), events)
 
     def _write_to_sock(self, data, conn):
         # This function is copied from
@@ -239,8 +235,8 @@ class TCPHandler():
         logging.debug(
                 '[TCP] %dB to %s:%d, stored' % (len(data), *self._remote_af))
 
-        if self._remote_connected:
-            self._on_remote_write()
+        # if self._remote_connected:
+            # self._on_remote_write()
 
     def _on_remote_write(self):
         # This function is copied from
@@ -293,8 +289,8 @@ class TCPHandler():
         self._data_2_local_sock.append(data)
         logging.debug('[TCP] %dB to %s:%d, stored' % (len(data), *self._src))
 
-        if self._local_connected:
-            self._on_local_write()
+        # if self._local_connected:
+            # self._on_local_write()
 
     def _on_local_write(self):
         # This function is copied from
@@ -350,7 +346,8 @@ class TCPHandler():
             if evt & select.EPOLLOUT:
                 if not self._remote_connected:
                     self._mark_remote_connected()
-                self._on_remote_write()
+                if self._data_2_remote_sock:
+                    self._on_remote_write()
         elif conn == self._local_conn:
             if evt & select.EPOLLRDHUP:
                 self._on_local_disconnect()
@@ -363,7 +360,8 @@ class TCPHandler():
             if evt & select.EPOLLOUT:
                 if not self._local_connected:
                     self._mark_local_connected()
-                self._on_local_write()
+                if self._data_2_local_sock:
+                    self._on_local_write()
 
     def destroy(self):
         if self._destroyed:
@@ -447,6 +445,7 @@ class UDPHandler():
         rt_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         rt_sock.setsockopt(socket.SOL_IP, socket.IP_TRANSPARENT, 1)
         rt_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        rt_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
         rt_sock.setblocking(False)
         rt_sock.bind(self._dest)
         return rt_sock
