@@ -40,8 +40,6 @@ class TCPHandler():
         self._data_2_local_sock = []
         self._data_2_remote_sock = []
         self._remote_conn = None
-        self._remote_connected = False
-        self._local_connected = False
         self._fpacket_handled = False
         self._destroyed = False
         if self._is_local:
@@ -60,12 +58,13 @@ class TCPHandler():
             self._remote_port = None
             self._remote_af = None
             self._cryptor = None
-        events = select.EPOLLIN | select.EPOLLOUT |\
-                    select.EPOLLRDHUP | select.EPOLLERR
+        events = select.EPOLLIN | select.EPOLLRDHUP | select.EPOLLERR
         self._add_conn_to_poll(self._local_conn, events)
         if self._is_local:
             self._handle_fpacket()
             self._fpacket_handled = True
+        self._local_sock_poll_mode = 'ro'
+        self._remote_sock_poll_mode = 'ro'
 
     def _fd_2_conn(self, fd):
         if fd == self._local_conn.fileno():
@@ -102,25 +101,26 @@ class TCPHandler():
                 return None
         return remote_sock
 
-    def _mark_remote_connected(self):
-        if hasattr(self, '_remote_conn'):
-            self._remote_connected = True
+    def _epoll_modify_2_ro(self, sock):
+        events = select.EPOLLIN | select.EPOLLRDHUP | select.EPOLLERR
+        self._epoll.modify(sock.fileno(), events)
+        if sock == self._local_conn:
+            self._local_sock_poll_mode = 'ro'
+        elif sock == self._remote_conn:
+            self._remote_sock_poll_mode = 'ro'
 
-    def _mark_local_connected(self):
-        if hasattr(self, '_local_conn'):
-            self._local_connected = True
+    def _epoll_modify_2_rw(self, sock):
+        events = select.EPOLLIN | select.EPOLLOUT |\
+                    select.EPOLLRDHUP | select.EPOLLERR
+        self._epoll.modify(sock.fileno(), events)
+        if sock == self._local_conn:
+            self._local_sock_poll_mode = 'rw'
+        elif sock == self._remote_conn:
+            self._remote_sock_poll_mode = 'rw'
 
     def _write_to_sock(self, data, conn):
-        # This function is copied from
-        #      shadowsocks.tcprelay.TCPRelayHandler._write_to_sock
-        # I made some change to fit my project.
-
-        # Copyright 2013-2015 clowwindy
-        # Licensed under the Apache License, Version 2.0
-        # https://www.apache.org/licenses/LICENSE-2.0
-
         if not data or not conn:
-            return
+            return None
         uncomplete = False
         try:
             l = len(data)
@@ -134,12 +134,14 @@ class TCPHandler():
                 uncomplete = True
             else:
                 self.destroy()
-                return
+                return None
         if uncomplete:
             if conn == self._local_conn:
                 self._data_2_local_sock.append(data)
             elif conn == self._remote_conn:
                 self._data_2_remote_sock.append(data)
+        else:
+            self._epoll_modify_2_ro(conn)
 
     def _handle_fpacket(self, data=b''):
         if self._is_local:
@@ -192,19 +194,10 @@ class TCPHandler():
         else:
             logging.info('[TCP] Connecting to %s:%d' % self._remote_af)
 
-        events = select.EPOLLIN | select.EPOLLOUT |\
-                    select.EPOLLRDHUP | select.EPOLLERR
+        events = select.EPOLLIN | select.EPOLLRDHUP | select.EPOLLERR
         self._add_conn_to_poll(self._remote_conn, events)
 
     def _on_local_read(self):
-        # This functuion is copied from
-        #      shadowsocks.tcprelay.TCPRelayHandler._on_local_read
-        # I made some change to fit my project.
-
-        # Copyright 2013-2015 clowwindy
-        # Licensed under the Apache License, Version 2.0
-        # https://www.apache.org/licenses/LICENSE-2.0
-
         if self._destroyed:
             return
 
@@ -228,25 +221,17 @@ class TCPHandler():
             if not self._fpacket_handled:
                 self._handle_fpacket(data)
                 self._fpacket_handled = True
+                self._epoll_modify_2_rw(self._remote_conn)
                 return
             else:
                 data = self._cryptor.decrypt(data)
         self._data_2_remote_sock.append(data)
+        if self._remote_sock_poll_mode == 'ro':
+            self._epoll_modify_2_rw(self._remote_conn)
         logging.debug(
                 '[TCP] %dB to %s:%d, stored' % (len(data), *self._remote_af))
 
-        # if self._remote_connected:
-            # self._on_remote_write()
-
     def _on_remote_write(self):
-        # This function is copied from
-        #      shadowsocks.tcprelay.TCPRelayHandler._on_remote_write
-        # I made some change to fit my project.
-
-        # Copyright 2013-2015 clowwindy
-        # Licensed under the Apache License, Version 2.0
-        # https://www.apache.org/licenses/LICENSE-2.0
-
         if self._destroyed:
             return
 
@@ -254,16 +239,10 @@ class TCPHandler():
             data = b''.join(self._data_2_remote_sock)
             self._data_2_remote_sock = []
             self._write_to_sock(data, self._remote_conn)
+            logging.debug(
+                    '[TCP] Sent %dB to %s:%d' % (len(data), *self._remote_af))
 
     def _on_remote_read(self):
-        # This function is copied from
-        #      shadowsocks.tcprelay.TCPRelayHandler._on_remote_read
-        # I made some change to fit my project.
-
-        # Copyright 2013-2015 clowwindy
-        # Licensed under the Apache License, Version 2.0
-        # https://www.apache.org/licenses/LICENSE-2.0
-
         if self._destroyed:
             return
         if self._is_local:
@@ -287,20 +266,11 @@ class TCPHandler():
         else:
             data = self._cryptor.encrypt(data)
         self._data_2_local_sock.append(data)
+        if self._local_sock_poll_mode == 'ro':
+            self._epoll_modify_2_rw(self._local_conn)
         logging.debug('[TCP] %dB to %s:%d, stored' % (len(data), *self._src))
 
-        # if self._local_connected:
-            # self._on_local_write()
-
     def _on_local_write(self):
-        # This function is copied from
-        #      shadowsocks.tcprelay.TCPRelayHandler._on_local_write
-        # I made some change to fit my project.
-
-        # Copyright 2013-2015 clowwindy
-        # Licensed under the Apache License, Version 2.0
-        # https://www.apache.org/licenses/LICENSE-2.0
-
         if self._destroyed:
             return
 
@@ -308,6 +278,8 @@ class TCPHandler():
             data = b''.join(self._data_2_local_sock)
             self._data_2_local_sock = []
             self._write_to_sock(data, self._local_conn)
+            logging.debug(
+                    '[TCP] Sent %dB to %s:%d' % (len(data), *self._src))
 
     def _on_local_disconnect(self):
         logging.info('[TCP] Local socket got EPOLLRDHUP, do destroy()')
@@ -339,29 +311,19 @@ class TCPHandler():
                 self._on_remote_disconnect()
             if evt & select.EPOLLERR:
                 self._on_remote_error()
-            if evt & (select.EPOLLIN | select.EPOLLHUP):
-                if not self._remote_connected:
-                    self._mark_remote_connected()
+            if evt & (select.EPOLLIN):
                 self._on_remote_read()
             if evt & select.EPOLLOUT:
-                if not self._remote_connected:
-                    self._mark_remote_connected()
-                if self._data_2_remote_sock:
-                    self._on_remote_write()
+                self._on_remote_write()
         elif conn == self._local_conn:
             if evt & select.EPOLLRDHUP:
                 self._on_local_disconnect()
             if evt & select.EPOLLERR:
                 self._on_local_error()
-            if evt & (select.EPOLLIN | select.EPOLLHUP):
-                if not self._local_connected:
-                    self._mark_local_connected()
+            if evt & (select.EPOLLIN):
                 self._on_local_read()
             if evt & select.EPOLLOUT:
-                if not self._local_connected:
-                    self._mark_local_connected()
-                if self._data_2_local_sock:
-                    self._on_local_write()
+                self._on_local_write()
 
     def destroy(self):
         if self._destroyed:
