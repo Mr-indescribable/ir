@@ -119,6 +119,14 @@ class TCPHandler():
             self._remote_sock_poll_mode = 'rw'
 
     def _write_to_sock(self, data, sock):
+        # This function is copied from
+        #      shadowsocks.tcprelay.TCPRelayHandler._write_to_sock
+        # I made some change to fit my project.
+
+        # Copyright 2013-2015 clowwindy
+        # Licensed under the Apache License, Version 2.0
+        # https://www.apache.org/licenses/LICENSE-2.0
+
         if not data or not sock:
             return None
         uncomplete = False
@@ -142,6 +150,138 @@ class TCPHandler():
                 self._data_2_remote_sock.append(data)
         else:
             self._epoll_modify_2_ro(sock)
+
+    def _on_local_read(self):
+        # This functuion is copied from
+        #      shadowsocks.tcprelay.TCPRelayHandler._on_local_read
+        # I made some change to fit my project.
+
+        # Copyright 2013-2015 clowwindy
+        # Licensed under the Apache License, Version 2.0
+        # https://www.apache.org/licenses/LICENSE-2.0
+
+        if self._destroyed:
+            return
+
+        if self._is_local:
+            buf_size = UP_STREAM_BUF_SIZE
+        else:
+            buf_size = DOWN_STREAM_BUF_SIZE
+        try:
+            data = self._local_sock.recv(buf_size)
+        except (OSError, IOError) as e:
+            if tools.errno_from_exception(e) in (errno.ETIMEDOUT, errno.EAGAIN,
+                                                 errno.EWOULDBLOCK):
+                return
+        if not data:
+            logging.info('[TCP] Local socket got null data')
+            return
+
+        if self._is_local:
+            data = self._cryptor.encrypt(data)
+        else:
+            if not self._fpacket_handled:
+                self._handle_fpacket(data)
+                self._fpacket_handled = True
+                self._epoll_modify_2_rw(self._remote_sock)
+                return
+            else:
+                data = self._cryptor.decrypt(data)
+        self._data_2_remote_sock.append(data)
+        if self._remote_sock_poll_mode == 'ro':
+            self._epoll_modify_2_rw(self._remote_sock)
+        logging.debug(
+                '[TCP] %dB to %s:%d, stored' % (len(data), *self._remote_af))
+
+    def _on_remote_write(self):
+        # This function is copied from
+        #      shadowsocks.tcprelay.TCPRelayHandler._on_remote_write
+        # I made some change to fit my project.
+
+        # Copyright 2013-2015 clowwindy
+        # Licensed under the Apache License, Version 2.0
+        # https://www.apache.org/licenses/LICENSE-2.0
+
+        if self._destroyed:
+            return
+
+        if self._data_2_remote_sock:
+            data = b''.join(self._data_2_remote_sock)
+            self._data_2_remote_sock = []
+            self._write_to_sock(data, self._remote_sock)
+            logging.debug(
+                    '[TCP] Sent %dB to %s:%d' % (len(data), *self._remote_af))
+
+    def _on_remote_read(self):
+        # This function is copied from
+        #      shadowsocks.tcprelay.TCPRelayHandler._on_remote_read
+        # I made some change to fit my project.
+
+        # Copyright 2013-2015 clowwindy
+        # Licensed under the Apache License, Version 2.0
+        # https://www.apache.org/licenses/LICENSE-2.0
+
+        if self._destroyed:
+            return
+        if self._is_local:
+            buf_size = UP_STREAM_BUF_SIZE
+        else:
+            buf_size = DOWN_STREAM_BUF_SIZE
+
+        data = None
+        try:
+            data = self._remote_sock.recv(buf_size)
+        except (OSError, IOError) as e:
+            if tools.errno_from_exception(e) in (errno.ETIMEDOUT, errno.EAGAIN,
+                                                 errno.EWOULDBLOCK):
+                return
+        if not data:
+            logging.info('[TCP] Remote socket got null data')
+            return
+
+        if self._is_local:
+            data = self._cryptor.decrypt(data)
+        else:
+            data = self._cryptor.encrypt(data)
+        self._data_2_local_sock.append(data)
+        if self._local_sock_poll_mode == 'ro':
+            self._epoll_modify_2_rw(self._local_sock)
+        logging.debug('[TCP] %dB to %s:%d, stored' % (len(data), *self._src))
+
+    def _on_local_write(self):
+        # This function is copied from
+        #      shadowsocks.tcprelay.TCPRelayHandler._on_local_write
+        # I made some change to fit my project.
+
+        # Copyright 2013-2015 clowwindy
+        # Licensed under the Apache License, Version 2.0
+        # https://www.apache.org/licenses/LICENSE-2.0
+
+        if self._destroyed:
+            return
+
+        if self._data_2_local_sock:
+            data = b''.join(self._data_2_local_sock)
+            self._data_2_local_sock = []
+            self._write_to_sock(data, self._local_sock)
+            logging.debug(
+                    '[TCP] Sent %dB to %s:%d' % (len(data), *self._src))
+
+    def _on_local_disconnect(self):
+        logging.info('[TCP] Local socket got EPOLLRDHUP, do destroy()')
+        self.destroy()
+
+    def _on_remote_disconnect(self):
+        logging.info('[TCP] Remote socket got EPOLLRDHUP, do destroy()')
+        self.destroy()
+
+    def _on_local_error(self):
+        logging.warn('[TCP] Local socket got EPOLLERR, do destroy()')
+        self.destroy()
+
+    def _on_remote_error(self):
+        logging.warn('[TCP] Remote socket got EPOLLERR, do destroy()')
+        self.destroy()
 
     def _handle_fpacket(self, data=b''):
         if self._is_local:
@@ -196,106 +336,6 @@ class TCPHandler():
 
         events = select.EPOLLIN | select.EPOLLRDHUP | select.EPOLLERR
         self._add_sock_to_poll(self._remote_sock, events)
-
-    def _on_local_read(self):
-        if self._destroyed:
-            return
-
-        if self._is_local:
-            buf_size = UP_STREAM_BUF_SIZE
-        else:
-            buf_size = DOWN_STREAM_BUF_SIZE
-        try:
-            data = self._local_sock.recv(buf_size)
-        except (OSError, IOError) as e:
-            if tools.errno_from_exception(e) in (errno.ETIMEDOUT, errno.EAGAIN,
-                                                 errno.EWOULDBLOCK):
-                return
-        if not data:
-            logging.info('[TCP] Local socket got null data')
-            return
-
-        if self._is_local:
-            data = self._cryptor.encrypt(data)
-        else:
-            if not self._fpacket_handled:
-                self._handle_fpacket(data)
-                self._fpacket_handled = True
-                self._epoll_modify_2_rw(self._remote_sock)
-                return
-            else:
-                data = self._cryptor.decrypt(data)
-        self._data_2_remote_sock.append(data)
-        if self._remote_sock_poll_mode == 'ro':
-            self._epoll_modify_2_rw(self._remote_sock)
-        logging.debug(
-                '[TCP] %dB to %s:%d, stored' % (len(data), *self._remote_af))
-
-    def _on_remote_write(self):
-        if self._destroyed:
-            return
-
-        if self._data_2_remote_sock:
-            data = b''.join(self._data_2_remote_sock)
-            self._data_2_remote_sock = []
-            self._write_to_sock(data, self._remote_sock)
-            logging.debug(
-                    '[TCP] Sent %dB to %s:%d' % (len(data), *self._remote_af))
-
-    def _on_remote_read(self):
-        if self._destroyed:
-            return
-        if self._is_local:
-            buf_size = UP_STREAM_BUF_SIZE
-        else:
-            buf_size = DOWN_STREAM_BUF_SIZE
-
-        data = None
-        try:
-            data = self._remote_sock.recv(buf_size)
-        except (OSError, IOError) as e:
-            if tools.errno_from_exception(e) in (errno.ETIMEDOUT, errno.EAGAIN,
-                                                 errno.EWOULDBLOCK):
-                return
-        if not data:
-            logging.info('[TCP] Remote socket got null data')
-            return
-
-        if self._is_local:
-            data = self._cryptor.decrypt(data)
-        else:
-            data = self._cryptor.encrypt(data)
-        self._data_2_local_sock.append(data)
-        if self._local_sock_poll_mode == 'ro':
-            self._epoll_modify_2_rw(self._local_sock)
-        logging.debug('[TCP] %dB to %s:%d, stored' % (len(data), *self._src))
-
-    def _on_local_write(self):
-        if self._destroyed:
-            return
-
-        if self._data_2_local_sock:
-            data = b''.join(self._data_2_local_sock)
-            self._data_2_local_sock = []
-            self._write_to_sock(data, self._local_sock)
-            logging.debug(
-                    '[TCP] Sent %dB to %s:%d' % (len(data), *self._src))
-
-    def _on_local_disconnect(self):
-        logging.info('[TCP] Local socket got EPOLLRDHUP, do destroy()')
-        self.destroy()
-
-    def _on_remote_disconnect(self):
-        logging.info('[TCP] Remote socket got EPOLLRDHUP, do destroy()')
-        self.destroy()
-
-    def _on_local_error(self):
-        logging.warn('[TCP] Local socket got EPOLLERR, do destroy()')
-        self.destroy()
-
-    def _on_remote_error(self):
-        logging.warn('[TCP] Remote socket got EPOLLERR, do destroy()')
-        self.destroy()
 
     def handle_event(self, fd, evt):
         if self._destroyed:
