@@ -15,7 +15,10 @@ from ir.crypto import Cryptor
 from ir.protocol import PacketMaker, PacketParser
 
 
-__all__ = ['TCPHandler', 'UDPHandler']
+__all__ = ['TCPHandler',
+           'UDPHandler',
+           'UDPMultiTransmitHandler',
+           'CacheQueue']
 
 
 SO_ADDR_SIZE = 16
