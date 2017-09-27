@@ -102,6 +102,8 @@ class TCPHandler():
                 pass
             else:
                 return None
+        logging.debug('[TCP] Created remote socket @ %s:%d, fd: %d' %\
+                                        (*remote_af, remote_sock.fileno()))
         return remote_sock
 
     def _epoll_modify_2_ro(self, sock):
@@ -186,15 +188,14 @@ class TCPHandler():
             if not self._fpacket_handled:
                 self._handle_fpacket(data)
                 self._fpacket_handled = True
-                self._epoll_modify_2_rw(self._remote_sock)
                 return
             else:
                 data = self._cryptor.decrypt(data)
         self._data_2_remote_sock.append(data)
-        if self._remote_sock_poll_mode == 'ro':
-            self._epoll_modify_2_rw(self._remote_sock)
         logging.debug(
                 '[TCP] %dB to %s:%d, stored' % (len(data), *self._remote_af))
+        if self._remote_sock_poll_mode == 'ro':
+            self._epoll_modify_2_rw(self._remote_sock)
 
     def _on_remote_write(self):
         # This function is copied from
@@ -247,9 +248,9 @@ class TCPHandler():
         else:
             data = self._cryptor.encrypt(data)
         self._data_2_local_sock.append(data)
+        logging.debug('[TCP] %dB to %s:%d, stored' % (len(data), *self._src))
         if self._local_sock_poll_mode == 'ro':
             self._epoll_modify_2_rw(self._local_sock)
-        logging.debug('[TCP] %dB to %s:%d, stored' % (len(data), *self._src))
 
     def _on_local_write(self):
         # This function is copied from
@@ -271,10 +272,14 @@ class TCPHandler():
                     '[TCP] Sent %dB to %s:%d' % (len(data), *self._src))
 
     def _on_local_disconnect(self):
+        if self._data_2_remote_sock:
+            self._on_remote_write()
         logging.info('[TCP] Local socket got EPOLLRDHUP, do destroy()')
         self.destroy()
 
     def _on_remote_disconnect(self):
+        if self._data_2_local_sock:
+            self._on_local_write()
         logging.info('[TCP] Remote socket got EPOLLRDHUP, do destroy()')
         self.destroy()
 
@@ -311,10 +316,14 @@ class TCPHandler():
             self._remote_port = self._remote_af[1]
             self._cryptor = res['cryptor']
             self._iv = res['iv']
-        if len(data) > 0:
+        if data:
+            events = select.EPOLLIN | select.EPOLLOUT |\
+                        select.EPOLLRDHUP | select.EPOLLERR
             self._data_2_remote_sock.append(data)
-        logging.debug('[TCP] %dB to %s:%d, stored' % (len(data),
-                                                      *self._remote_af))
+            logging.debug('[TCP] %dB to %s:%d, stored' % (len(data),
+                                                          *self._remote_af))
+        else:
+            events = select.EPOLLIN | select.EPOLLRDHUP | select.EPOLLERR
 
         if self._is_local:
             if not (self._remote_ip and self._remote_port):
@@ -337,7 +346,6 @@ class TCPHandler():
         else:
             logging.info('[TCP] Connecting to %s:%d' % self._remote_af)
 
-        events = select.EPOLLIN | select.EPOLLRDHUP | select.EPOLLERR
         self._add_sock_to_poll(self._remote_sock, events)
 
     def handle_event(self, fd, evt):
@@ -390,7 +398,8 @@ class TCPHandler():
                 af = self._dest_af
             else:
                 af = self._remote_af
-            logging.info('[TCP] Remote socket @ %s:%d destroyed' % af)
+            logging.info('[TCP] Remote socket @ %s:%d destroyed, fd: %d' %\
+                                                              (*af, rmt_fd))
 
     @property
     def destroyed(self):
