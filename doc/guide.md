@@ -2,9 +2,13 @@
 
 ### 启动方式
 
-由于不可描述先生比较懒，所以只写了2个基础启动脚本：ir-local和ir-remote. 将脚本中的config\_path变量的值修改为配置文件路径运行脚本即可启动
+由于不可描述先生比较懒，所以只写了2个基础启动脚本：ir-local和ir-remote。
 
-> 若需要命令行参数，pid文件等功能...... 自己改代码去
+使用方式：
+
+* ir-local -c /path/to/config\_file
+* ir-remote -c /path/to/config\_file
+
 
 ### 后台运行
 

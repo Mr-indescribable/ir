@@ -1,12 +1,10 @@
 #!/usr/bin/python3.6
 # coding: utf-8
 
-
+import argparse
 from multiprocessing import Process
+
 from ir.remote import RemoteTCPServer, RemoteUDPServer
-
-
-config_path = 'example/remote_config.example.json'
 
 
 def run_tcp(config_path):
@@ -19,13 +17,30 @@ def run_udp(config_path):
     server.run()
 
 
-try:
-    tcp_server = Process(target=run_tcp, args=[config_path])
-    udp_server = Process(target=run_udp, args=[config_path])
-    tcp_server.start()
-    udp_server.start()
-    tcp_server.join()
-    udp_server.join()
-except KeyboardInterrupt:
-    import sys
-    sys.exit()
+if __name__ == '__main__':
+    arg_parser = argparse.ArgumentParser(
+                    prog='ir-remote',
+                    )
+    arg_parser.add_argument(
+            '-c',
+            metavar='<config_file>',
+            help='specify the config file',
+            )
+
+    args = arg_parser.parse_args()
+    if not args.c:
+        print('please specify the config file')
+        import sys
+        sys.exit(1)
+    config_path = args.c
+
+    try:
+        tcp_server = Process(target=run_tcp, args=[config_path])
+        udp_server = Process(target=run_udp, args=[config_path])
+        tcp_server.start()
+        udp_server.start()
+        tcp_server.join()
+        udp_server.join()
+    except KeyboardInterrupt:
+        import sys
+        sys.exit()
