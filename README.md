@@ -5,7 +5,7 @@
 + Just like [ss-redir](https://github.com/shadowsocks/shadowsocks-libev#advanced-usage)
 + This is an indescribable program can be used to do something indescribable.
 
-#### Who need this?
+#### Who may need this?
 
 + Chinese Steam users. (Yeah, such as me.
 
