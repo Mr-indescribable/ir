@@ -42,7 +42,8 @@ class ServerMixin(object):
         self._epoll.register(self._local_sock_fd, self._poll_mode)
 
     def _read_config(self, config_path):
-        return tools.Initer.init_from_config_file(config_path)
+        return tools.Initer.init_from_config_file(config_path,
+                                                  self._server_type)
 
     def _add_handler(self, fd, handler):
         # in tcp mode, a handler will have multiple fd
@@ -79,6 +80,7 @@ class ServerMixin(object):
 
 class TCPServer(ServerMixin):
 
+    _server_type = 'TCP'
     _poll_mode = select.EPOLLIN | select.EPOLLRDHUP | select.EPOLLERR
 
     # store tcp connection handlers, {fd: handler}
@@ -90,7 +92,7 @@ class TCPServer(ServerMixin):
                                    self._config.get('passwd'),
                                    self._config.get('crypto_libpath'),
                                    reset_mode=True)
-        logging.info('[TCP] Initialized cipher with method: %s'\
+        logging.info('[TCP] Initialized Cryptor with cipher: %s'\
                                     % self._config.get('cipher_name'))
 
     def _init_socket(self, listen_addr=None, listen_port=None, so_backlog=1024):
@@ -137,6 +139,7 @@ class TCPServer(ServerMixin):
 
 class UDPServer(ServerMixin):
 
+    _server_type = 'UDP'
     _poll_mode = select.EPOLLIN | select.EPOLLERR
 
     # store udp relay handlers, {fd: handler}
@@ -188,7 +191,7 @@ class UDPServer(ServerMixin):
                           self._config.get('passwd'),
                           self._config.get('crypto_libpath'),
                           reset_mode=True)
-        logging.info('[UDP] Initialized cipher with method: %s'\
+        logging.info('[UDP] Initialized Cryptor with cipher: %s'\
                                     % self._config.get('cipher_name'))
         self._excl = SrcExclusiveItems(self._is_local, cryptor)
 

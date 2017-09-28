@@ -10,10 +10,26 @@ import logging
 class Initer(object):
 
     @classmethod
-    def init_from_config_file(cls, config_path):
+    def init_from_config_file(cls, config_path, server_type):
         config = cls.read_config_file(config_path)
-        cls.init_logger(config.get('log_level'))
-        logging.info('loaded config from %s' % config_path)
+        log_file = config.get('log_file')
+        if isinstance(log_file, dict):
+            try:
+                if server_type == 'TCP':
+                    log_file = log_file['tcp']
+                elif server_type == 'UDP':
+                    log_file = log_file['udp']
+            except KeyError as e:
+                log_file = -1
+        elif log_file is None:
+            pass
+        else:
+            log_file = -1
+        if log_file == -1:
+            raise Exception('Invalid config: log_file')
+                
+        cls.init_logger(config.get('log_level'), log_file)
+        logging.info('Loaded config from %s' % config_path)
         return config
 
     @classmethod
@@ -23,29 +39,34 @@ class Initer(object):
             try:
                 return json.loads(data)
             except ValueError as e:
-                logging.error('format error in %s' % config_path)
+                logging.error('Format error in %s' % config_path)
                 import sys
                 sys.exit(1)
 
     @classmethod
-    def init_logger(cls, lvl):
-        logging.basicConfig(level=logging.INFO,
-                            format='%(levelname)-s: %(message)s')
-        lvl_map = {
+    def init_logger(cls, lv, log_file=None):
+        fmt = '%(asctime)s %(levelname)-8s %(message)s'
+        dtfmt = '%H:%M:%S'
+        lv_map = {
                 'debug': logging.DEBUG,
                 'info': logging.INFO,
                 'warn': logging.WARN,
                 'warning': logging.WARN,
-                'error': logging.ERROR
+                'error': logging.ERROR,
                 }
-        level = lvl_map.get(lvl)
+        level = lv_map.get(lv)
         if not level:
-            logging.info('got invalid log level, using logging.INFO')
-            level = logging.INFO
-        logging.getLogger('').handlers = []
-        logging.basicConfig(level=level,
-                            format='%(asctime)s %(levelname)-8s %(message)s',
-                            datefmt='%H:%M:%S')
+            raise Exception('Invalid config: log_level')
+
+        if log_file:
+            logging.basicConfig(level=level, format=fmt, datefmt=dtfmt)
+            fh = logging.FileHandler(log_file)
+            fmter = logging.Formatter(fmt, dtfmt)
+            fh.setFormatter(fmter)
+            logging.getLogger('').handlers = [fh]
+        else:
+            logging.getLogger('').handlers = []
+            logging.basicConfig(level=level, format=fmt, datefmt=dtfmt)
 
 
 class HashTools(object):
