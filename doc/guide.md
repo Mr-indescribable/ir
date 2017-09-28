@@ -4,7 +4,7 @@
 
 由于不可描述先生比较懒，所以只写了2个基础启动脚本：ir-local和ir-remote. 将脚本中的config\_path变量的值修改为配置文件路径运行脚本即可启动
 
-> 若需要命令行参数，pid文件，日志文件等功能...... 自己改代码去
+> 若需要命令行参数，pid文件等功能...... 自己改代码去
 
 ### 后台运行
 
@@ -28,6 +28,7 @@ ir的启动脚本并没有提供daemon模式，后台运行需要借助其它工
 |L&R|             cipher\_name                |  加密方式。明细: ir.cryptor.openssl.OpenSSLCryptor.supported\_cipher  |
 |L&R|                passwd                   |                            用于身份认证的密码                         |
 |L&R|      udp\_socket\_max\_idle\_time       |                     UDP socket最大闲置时间，过期销毁                  |
+|L&R|               log\_file                 |日志文件，不配置则输出至stdout，格式：{"tcp": "a.log", "udp": "b.log"} |
 |L&R|               log\_level                |       日志级别，支持的选项有：debug, info, warn, warning, error       |
 |L&R|            crypto\_libpath              |                             加密库所在路径                            |
 |L&R|          udp\_min\_salt\_len            |                    指定UDP包头中salt随机长度的最小值                  |
