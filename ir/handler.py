@@ -703,8 +703,12 @@ class CacheQueue():
 
 
 def test_socket_bind_time_spent():
-    # UDPHandler.handle_remote_resp中向客户端socket写入数据部分的处理
-    # 使用了和ss-libev相同的方法，此处测试socket新建、绑定、关闭所用的时间
+    # UDPHandler.handle_remote_resp中向应用程序的socket写入数据部分的处理
+    # 曾使用过和ss-redir相同的方法，此处测试socket新建、绑定、关闭所用的时间。
+
+    # 目前这部分的功能已经修改过了，每个UDPHandler配备有一个return_socket
+    # 用于返回数据至应用程序的socket，无需重复制作。
+    # 这个测试用的函数暂且留着。（也许有用
 
     def _bind():
         tmp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

@@ -65,7 +65,7 @@ class Cryptor(object):
     def encrypt(self, data):
         r = self._cipher.update(data)
         if self._reset_mode:
-            # This will cost about 14ms of additional time each 1k packet.
+            # This will cost about 14ms of additional time for each 1k packet.
             self.reset()
         return r
 
