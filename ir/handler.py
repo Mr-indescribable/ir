@@ -274,14 +274,16 @@ class TCPHandler():
     def _on_local_disconnect(self):
         if self._data_2_remote_sock:
             self._on_remote_write()
-        logging.info('[TCP] Local socket got EPOLLRDHUP, do destroy()')
-        self.destroy()
+        if not self._data_2_remote_sock:
+            logging.info('[TCP] Local socket got EPOLLRDHUP, do destroy()')
+            self.destroy()
 
     def _on_remote_disconnect(self):
         if self._data_2_local_sock:
             self._on_local_write()
-        logging.info('[TCP] Remote socket got EPOLLRDHUP, do destroy()')
-        self.destroy()
+        if not self._data_2_local_sock:
+            logging.info('[TCP] Remote socket got EPOLLRDHUP, do destroy()')
+            self.destroy()
 
     def _on_local_error(self):
         logging.warn('[TCP] Local socket got EPOLLERR, do destroy()')
@@ -358,23 +360,23 @@ class TCPHandler():
             return
 
         if sock == self._remote_sock:
-            if evt & select.EPOLLRDHUP:
-                self._on_remote_disconnect()
             if evt & select.EPOLLERR:
                 self._on_remote_error()
             if evt & (select.EPOLLIN):
                 self._on_remote_read()
             if evt & select.EPOLLOUT:
                 self._on_remote_write()
-        elif sock == self._local_sock:
             if evt & select.EPOLLRDHUP:
-                self._on_local_disconnect()
+                self._on_remote_disconnect()
+        elif sock == self._local_sock:
             if evt & select.EPOLLERR:
                 self._on_local_error()
             if evt & (select.EPOLLIN):
                 self._on_local_read()
             if evt & select.EPOLLOUT:
                 self._on_local_write()
+            if evt & select.EPOLLRDHUP:
+                self._on_local_disconnect()
 
     def destroy(self):
         if self._destroyed:
