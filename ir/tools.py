@@ -46,7 +46,7 @@ class Initer(object):
     @classmethod
     def init_logger(cls, lv, log_file=None):
         fmt = '%(asctime)s %(levelname)-8s %(message)s'
-        dtfmt = '%H:%M:%S'
+        dtfmt = '%Y-%m-%d %H:%M:%S'
         lv_map = {
                 'debug': logging.DEBUG,
                 'info': logging.INFO,
