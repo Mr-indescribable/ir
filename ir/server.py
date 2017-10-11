@@ -150,20 +150,20 @@ class UDPServer(ServerMixin):
 
     default_iv_changed = False
 
-    def _add_handler(self, handler, fd=None, src_port=None):
+    def _add_handler(self, handler, fd=None, mkey=None):
         if fd:
             self._fd_2_handler[fd] = handler
-        if src_port:
-            self._src_port_2_handler[src_port] = handler
+        if mkey:
+            self._mkey_2_handler[mkey] = handler
 
-    def _remove_handler(self, fd=None, key=None, src_port=None):
+    def _remove_handler(self, fd=None, key=None, mkey=None):
         if fd in self._fd_2_handler:
             del self._fd_2_handler[fd]
         if key in self._key_2_handler:
             del self._key_2_handler[key]
-        if (hasattr(self, '_src_port_2_handler') and
-                src_port in self._src_port_2_handler):
-            del self._src_port_2_handler[src_port]
+        if (hasattr(self, '_mkey_2_handler') and
+                mkey in self._mkey_2_handler):
+            del self._mkey_2_handler[mkey]
 
     def _init_socket(self, listen_addr=None, listen_port=None):
         listen_addr = listen_addr or self._config['listen_addr']
@@ -200,7 +200,7 @@ class UDPServer(ServerMixin):
             self._mth = UDPMultiTransmitHandler(self._config, self._is_local)
             self._multi_transmit = True
             if not self._is_local:
-                self._src_port_2_handler = {}
+                self._mkey_2_handler = {}
                 self._available_saddrs = self._config.get('udp_multi_source')
             logging.info('[UDP] Multi-transmit on')
         else:
@@ -210,8 +210,12 @@ class UDPServer(ServerMixin):
         cleaner = ExpiredUDPSocketCleaner(self, max_idle_time)
         cleaner.start()
 
-    def _gen_handler_key(self, source, dest):
-        return '%s:%d@%s:%d' % (source[0], source[1], dest[0], dest[1])
+    def _gen_handler_key(self, src, dest):
+        return '%s:%d@%s:%d' % (*src, *dest)
+        # return '%s:%d@%s:%d' % (source[0], source[1], dest[0], dest[1])
+
+    def _gen_handler_mkey(self, src, dest):
+        return '%d@%s:%d' % (src[1], *dest)
 
     def _local_manage_iv(self, iv, decrypted_by_nc=None):
         cmd = self._excl.iv_mgr_new_stage(iv, decrypted_by_nc)
@@ -315,6 +319,7 @@ class UDPServer(ServerMixin):
         if fd == self._local_sock_fd:
             if evt & select.EPOLLERR:
                 logging.warn('[UDP] Server socket got EPOLLERR')
+                return
             elif evt & select.EPOLLIN:
                 data, src, dest = self._server_socket_recv()
                 if not dest:
@@ -326,11 +331,12 @@ class UDPServer(ServerMixin):
                                 '[UDP] Got request from unavailable source')
                         return
 
-                    handler = self._src_port_2_handler.get(src[1])
+                    mkey = self._gen_handler_mkey(src, dest)
+                    handler = self._mkey_2_handler.get(mkey)
                     if not (handler and handler.update_last_call_time()):
                         handler = UDPHandler(src, dest, self, self._local_sock,
                                              self._epoll, self._config,
-                                             self._is_local)
+                                             self._is_local, mkey=mkey)
                     if data:
                         handler.handle_local_recv(data)
                     else:
@@ -347,6 +353,7 @@ class UDPServer(ServerMixin):
         else:
             if evt & select.EPOLLERR:
                 logging.warn('[UDP] Client socket got EPOLLERR')
+                return
             elif evt & select.EPOLLIN:
                 handler = self._fd_2_handler.get(fd)
                 if handler:

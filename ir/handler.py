@@ -410,8 +410,8 @@ class TCPHandler():
 
 class UDPHandler():
 
-    def __init__(self, src, dest, server, server_sock,
-                       epoll, config, is_local, key=None):
+    def __init__(self, src, dest, server, server_sock, epoll,
+                       config, is_local, key=None, mkey=None):
         self.last_call_time = time.time()
         self._src = src
         self._dest = dest
@@ -421,6 +421,7 @@ class UDPHandler():
         self._config = config
         self._is_local = is_local
         self._key = key
+        self._mkey = mkey
         self._min_salt_len = config.get('udp_min_salt_len') or 4
         self._max_salt_len = config.get('udp_max_salt_len') or 32
         if self._is_local:
@@ -469,8 +470,8 @@ class UDPHandler():
     def _add_sock_to_poll(self, sock, mode):
         self._epoll.register(sock.fileno(), mode)
         self._server._add_handler(self, fd=sock.fileno())
-        if self._server._multi_transmit and not self._is_local:
-            self._server._add_handler(self, src_port=self._src[1])
+        if self._mkey:
+            self._server._add_handler(self, mkey=self._mkey)
 
     def update_last_call_time(self):
         if self._destroyed:
@@ -539,8 +540,7 @@ class UDPHandler():
             if self._server._multi_transmit:
                 res, is_duplicate = self._server._mth.handle_recv(res)
                 if is_duplicate:
-                    logging.debug(
-                            '[UDP_MT] Dropped duplicate packet')
+                    logging.debug('[UDP_MT] Dropped duplicate packet')
                     return
             decrypted_by_nc = cryptor == excl.nc_in_progress
             iv = res['iv']
@@ -596,8 +596,8 @@ class UDPHandler():
             self._server._remove_handler(fd=fd)
         if self._key:
             self._server._remove_handler(key=self._key)
-        if self._server._multi_transmit and not self._is_local:
-            self._server._remove_handler(src_port=self._src[1])
+        if self._mkey:
+            self._server._remove_handler(mkey=self._mkey)
         logging.debug('[UDP] Handler destroyed')
         return True
 
