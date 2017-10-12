@@ -12,7 +12,7 @@ from ir.tools import HashTools
 __all__ = ['PacketMaker', 'PacketParser', 'IVManager']
 
 
-'''Protocol of IR
+'''The Basic Protocol of IR
 
 
 TCP First Packet Format (before encrypt):
@@ -304,7 +304,7 @@ Field Description:
     DEST.AF:
         The IPV4 address and port of the destination.
         Range: 0x000000000000 - 0xFFFFFFFFFFFF
-        First 4 bytes is the IPV4 address, last 2 bytes is the port.
+        First 4 bytes are the IPV4 address, last 2 bytes are the port.
         When remote UDPServer return packets to local UDPServer, this field
         should be set to empty.
 

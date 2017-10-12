@@ -12,7 +12,7 @@ import time
 
 from ir import tools
 from ir.crypto import Cryptor
-from ir.protocol import PacketMaker, PacketParser
+from ir.protocol.base import PacketMaker, PacketParser
 
 
 __all__ = ['TCPHandler',

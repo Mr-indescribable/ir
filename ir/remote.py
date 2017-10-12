@@ -2,7 +2,7 @@
 # coding: utf-8
 
 
-from ir.server import TCPServer, UDPServer
+from ir.server.base import TCPServer, UDPServer
 
 
 __all__ = ['RemoteTCPServer', 'RemoteUDPServer']

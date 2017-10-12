@@ -12,7 +12,7 @@ from threading import Thread
 from ir import tools
 from ir.handler import TCPHandler, UDPHandler, UDPMultiTransmitHandler
 from ir.crypto import Cryptor, preload_crypto_lib
-from ir.protocol import IVManager, PacketParser
+from ir.protocol.base import IVManager, PacketParser
 
 
 __all__ = ['TCPServer',
