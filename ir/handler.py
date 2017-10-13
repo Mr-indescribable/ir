@@ -619,15 +619,12 @@ class UDPMultiTransmitHandler():
             if not isinstance(multi_remote, dict):
                 raise Exception('Format of udp_multi_remote is invalid')
             self._server_af_list = [(ip, pt) for ip, pt in multi_remote.items()]
-        # else:
-            # self._source_list = config.get('udp_multi_source')
-            # if not isinstance(self._source_list, list):
-                # raise Exception('Format of udp_multi_source is invalid')
-        self._max_serial = config.get('udp_multi_transmit_max_cache') or 32768
-        self._max_cache_size = self._max_serial
+
+        ms = config.get('udp_multi_transmit_max_packet_serial') or 32768
+        self._max_serial = ms
         self._transmit_times = config.get('udp_multi_transmit_times') or 1
         self.serial = -1
-        self._cache = CacheQueue(self._max_cache_size)
+        self._cache = CacheQueue()
 
     def next_serial(self):
         if self.serial == self._max_serial:
@@ -685,19 +682,14 @@ class UDPMultiTransmitHandler():
 
 class CacheQueue():
 
-    def __init__(self, max_size):
-        self.max_size = max_size
+    def __init__(self):
         self._queue = {}
-        self._index = -1
 
-    def append(self, serial, mac):
-        if self._index == self.max_size:
-            self._index = -1
-        self._queue[serial] = mac
-        self._index = serial
+    def append(self, serial, digest):
+        self._queue[serial] = digest
 
-    def cached(self, serial, mac):
-        if self._queue.get(serial) != mac:
+    def cached(self, serial, digest):
+        if self._queue.get(serial) != digest:
             return False
         return True
 
