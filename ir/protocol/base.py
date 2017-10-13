@@ -317,10 +317,10 @@ Field Description:
 '''
 
 
-class PacketMaker(object):
+class AfConverter():
 
     @classmethod
-    def ipv4_af_2_bytes(self, ipv4_af):
+    def ipv4_af_2_bytes(cls, ipv4_af):
         '''('1.1.1.1', 65535) --> 0x01 0x01 0x01 0x01 0xff 0xff
         '''
 
@@ -328,67 +328,6 @@ class PacketMaker(object):
         ip = ipv4_af[0]
         splited_ip = [int(u) for u in ip.split('.')]
         return struct.pack('BBBBH', *splited_ip, port)
-
-    @classmethod
-    def make_tcp_fpacket(cls, data, dest_af, iv, cryptor, iv_cryptor):
-        '''make the first packet of tcp connection
-
-        :param data: data from applications. Type: bytes
-        :param dest_af: IPV4 address and port of dest. Struct: ('1.1.1.1', 1)
-        :param iv: iv for the cipher of this connection. Type: bytes
-        :param cryptor: a instance of crypto.Cryptor
-                        be used to encrypt the PAYLOAD
-                        different from make_udp_packet, this param is necessary
-        :param iv_cryptor: be used to encrypt the IV and IV.LEN
-                           different from make_udp_packet, it's necessary
-        :rtype: bytes
-        '''
-
-        iv_len = struct.pack('B', len(iv))
-        dest_af = cls.ipv4_af_2_bytes(dest_af)
-        dest_af_len = struct.pack('B', len(dest_af))
-        tmp = iv_len + iv + dest_af_len + dest_af
-        mac = HashTools.smd5(tmp).encode('utf-8')
-        mac_len = struct.pack('B', len(mac))
-        payload = mac_len + mac + dest_af_len + dest_af + data
-        payload = cryptor.encrypt(payload)
-        iv_len = iv_cryptor.encrypt(iv_len)
-        iv = iv_cryptor.encrypt(iv)
-        return iv_len + iv + payload
-
-    @classmethod
-    def make_udp_packet(cls, cryptor, data, dest_af, iv=b'', serial=0,
-                             time_=None, salt=b''):
-        '''make a udp packet
-
-        :param data: data from applications. Type: bytes
-        :param dest_af: IPV4 address and port of dest. Struct: ('1.1.1.1', 1)
-        :param serial: the serial number of packet, Type: int
-        :param iv: a new iv for the shared cipher. Type: bytes
-        :param cryptor: a instance of crypto.Cryptor
-                        be used to encrypt the final data
-        :rtype: bytes
-        '''
-
-        salt_len = struct.pack('B', len(salt))
-        time_ = time_ or int(time.time() * 10000000)
-        serial = struct.pack('I', serial)
-        time_ = struct.pack('L', time_)
-        dest_af = cls.ipv4_af_2_bytes(dest_af)
-        dest_af_len = struct.pack('B', len(dest_af))
-        iv_len = struct.pack('B', len(iv))
-        data_len = struct.pack('H', len(data))
-
-        head = salt_len + salt
-        tail = serial + time_ + iv_len + iv +\
-                dest_af_len + dest_af + data_len + data
-        mac = HashTools.smd5(head + tail).encode('utf-8')
-        mac_len = struct.pack('B', len(mac))
-        r_data = head + mac_len + mac + tail
-        return cryptor.encrypt(r_data)
-
-
-class PacketParser(object):
 
     @classmethod
     def bytes_2_ipv4_af(cls, data):
@@ -402,6 +341,70 @@ class PacketParser(object):
         ip = '.'.join([str(u) for u in splited_af[:-1]])
         return (ip, port)
 
+
+class PacketMaker():
+
+    @classmethod
+    def make_tcp_fpacket(cls, data, dest_af, iv, cryptor, iv_cryptor):
+        '''make the first packet of TCP connection
+
+        :param data: data from applications. Type: bytes
+        :param dest_af: IPV4 address and port of dest. Structure: ('1.1.1.1', 1)
+        :param iv: iv for the cipher of this connection. Type: bytes
+        :param cryptor: a instance of crypto.Cryptor
+                        be used to encrypt the PAYLOAD
+                        different from make_udp_packet, this param is necessary
+        :param iv_cryptor: be used to encrypt the IV and IV.LEN
+                           different from make_udp_packet, it's necessary
+        :rtype: bytes
+        '''
+
+        iv_len = struct.pack('B', len(iv))
+        dest_af = AfConverter.ipv4_af_2_bytes(dest_af)
+        dest_af_len = struct.pack('B', len(dest_af))
+        tmp = iv_len + iv + dest_af_len + dest_af
+        mac = HashTools.smd5(tmp).encode('utf-8')
+        mac_len = struct.pack('B', len(mac))
+        payload = mac_len + mac + dest_af_len + dest_af + data
+        payload = cryptor.encrypt(payload)
+        iv_len = iv_cryptor.encrypt(iv_len)
+        iv = iv_cryptor.encrypt(iv)
+        return iv_len + iv + payload
+
+    @classmethod
+    def make_udp_packet(cls, cryptor, data, dest_af, iv=b'', serial=0,
+                             time_=None, salt=b''):
+        '''make a UDP packet
+
+        :param data: data from applications. Type: bytes
+        :param dest_af: IPV4 address and port of dest. Structure: ('1.1.1.1', 1)
+        :param serial: the serial number of packet, Type: int
+        :param iv: a new iv for the shared cipher. Type: bytes
+        :param cryptor: a instance of crypto.Cryptor
+                        be used to encrypt the final data
+        :rtype: bytes
+        '''
+
+        salt_len = struct.pack('B', len(salt))
+        time_ = time_ or int(time.time() * 10000000)
+        serial = struct.pack('I', serial)
+        time_ = struct.pack('L', time_)
+        dest_af = AfConverter.ipv4_af_2_bytes(dest_af)
+        dest_af_len = struct.pack('B', len(dest_af))
+        iv_len = struct.pack('B', len(iv))
+        data_len = struct.pack('H', len(data))
+
+        head = salt_len + salt
+        tail = serial + time_ + iv_len + iv +\
+                dest_af_len + dest_af + data_len + data
+        mac = HashTools.smd5(head + tail).encode('utf-8')
+        mac_len = struct.pack('B', len(mac))
+        r_data = head + mac_len + mac + tail
+        return cryptor.encrypt(r_data)
+
+
+class PacketParser():
+
     @classmethod
     def auth_tcp_fpacket(cls, data):
         tmp = data['raw_iv_len'] + data['iv'] +\
@@ -413,7 +416,7 @@ class PacketParser(object):
 
     @classmethod
     def parse_tcp_fpacket(cls, raw_data, iv_cryptor, config):
-        '''parse a tcp packet
+        '''parse the first packet of TCP connection
 
         :param raw_data: just data. Type: bytes
         :param iv_cryptor: a instance of crypto.Cryptor
@@ -475,7 +478,7 @@ class PacketParser(object):
             dest_af_len = struct.unpack('B', raw_dest_af_len)[0]
             i += 1
             raw_dest_af = payload[i: i + dest_af_len]
-            dest_af = cls.bytes_2_ipv4_af(raw_dest_af)
+            dest_af = AfConverter.bytes_2_ipv4_af(raw_dest_af)
             i += dest_af_len
             data = payload[i:]
         except Exception:
@@ -512,7 +515,7 @@ class PacketParser(object):
 
     @classmethod
     def parse_udp_packet(cls, cryptor, raw_data):
-        '''parse a udp packet
+        '''parse a UDP packet
 
         :param raw_data: just data. Type: bytes
         :param cryptor: a instance of crypto.Cryptor
@@ -583,7 +586,7 @@ class PacketParser(object):
             dest_af_len = struct.unpack('B', raw_dest_af_len)[0]
             i += 1
             raw_dest_af = raw_data[i: i + dest_af_len]
-            dest_af = cls.bytes_2_ipv4_af(raw_dest_af)
+            dest_af = AfConverter.bytes_2_ipv4_af(raw_dest_af)
             i += dest_af_len
 
             raw_data_len = raw_data[i: i + 2]
@@ -623,7 +626,7 @@ class PacketParser(object):
         return res
 
 
-class IVManager(object):
+class IVManager():
 
     '''For IV management of UDP communication. (we don't need it in TCP mode)
     '''
