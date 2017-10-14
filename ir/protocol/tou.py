@@ -6,7 +6,7 @@ import struct
 from ir.protocol.base import AfConverter
 
 
-__all__ = []
+__all__ = ['PacketMaker', 'PacketParser']
 
 
 
@@ -206,7 +206,8 @@ class PacketMaker():
 
         serial = struct.pack('I', serial)
         type_ = struct.pack('B', type_)
-        return serial + type_ + body
+        body_len = struct.pack('H', len(body))
+        return serial + type_  + body_len + body
 
 
 class PacketParser():
@@ -233,3 +234,39 @@ class PacketParser():
 
         # We don't need any authentication here.
         # The UDPServer will provide reliability for the received data.
+        res = {'serial': None,
+               'type': None,
+               'dest_af': None,
+               'conn_status': None,
+               'data': None,
+               'data_serial': None,
+               'ack_type': None,
+               'recvd_serial': None,
+               'lost_serial': None}
+
+        i = 0
+        res['serial'] = struct.unpack('I' ,raw_data[i: i + 4])[0]
+        i += 4
+
+        type_ = struct.unpack('B', raw_data[i: i + 1])[0]
+        res['type'] = type_
+        i += 1
+
+        body_len = struct.unpack('H', raw_data[i: i + 2])[0]
+        i += 2
+
+        body = raw_data[i: i + body_len]
+
+        if type_ == 0:
+            res['dest_af'] = AfConverter.bytes_2_ipv4_af(body)
+        elif type_ == 1:
+            res['conn_status'] = struct.unpack('B', body)[0]
+        elif type_ == 2:
+            res['data_serial'] = struct.unpack('I', body[:4])[0]
+            res['data'] = body[4:]
+        elif type_ == 3:
+            res['ack_type'] = struct.unpack('B', body[:1])[0]
+            res['recvd_serial'] = struct.unpack('I', body[1:])[0]
+        elif type_ == 4:
+            res['lost_serial'] = struct.unpack('I', body)[0]
+        return res

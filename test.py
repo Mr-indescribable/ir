@@ -7,7 +7,6 @@ import time
 from ir.crypto import Cryptor
 from ir.crypto.openssl import OpenSSLCryptor
 
-
 def test_cryptor_reset(cn):
     c = Cryptor(cn, 'PWDDDDDDDDDDD', 'libcrypto.so.1.1',
                 iv=None, reset_mode=True)
@@ -70,8 +69,109 @@ def test_stream():
     print(b)
 
 
+def test_tcp_fpacket_make_and_parse():
+    print('test tcp fpacket...\n')
+    from ir.protocol.base import PacketMaker, PacketParser
+
+    config = {
+            'cipher_name': 'aes-256-gcm',
+            'passwd': 'aaaaaaaaaaaaaaa',
+            'crypto_libpath': 'libcrypto.so.1.1',
+            }
+    iv = b'asldjfl;akjdf;lajs;ldfjk'
+
+    local_ct = Cryptor(config['cipher_name'], config['passwd'],
+                       config['crypto_libpath'], iv)
+    local_iv_ct = Cryptor(config['cipher_name'], config['passwd'])
+    remote_iv_ct = Cryptor(config['cipher_name'], config['passwd'])
+
+    data = b'testing-=-=-=-=-=-=-=-'
+    dest_af = ('192.168.122.1', 53)
+
+    r = PacketMaker.make_tcp_fpacket(data, dest_af, iv, local_ct, local_iv_ct)
+    print(r)
+    print('--------------')
+    r = PacketParser.parse_tcp_fpacket(r, remote_iv_ct, config)
+    print(r)
+
+
+def test_udp_packet_make_and_parse():
+    print('test udp packet...\n')
+    from ir.protocol.base import PacketMaker, PacketParser
+
+    method = 'aes-256-gcm'
+    pwd = 'aaaaaaaaaaaaaaa'
+    local_ct = Cryptor(method, pwd)
+    # pwd = 'aaaaaaaaaaaaabb'
+    remote_ct = Cryptor(method, pwd)
+
+    data = b'test00000'
+    dest_af = ('192.168.122.1', 53)
+    iv = b'aaaaaaaabbbb'
+    r = PacketMaker.make_udp_packet(local_ct, data, dest_af, iv)
+    print(r)
+    print('-----------------')
+    r = PacketParser.parse_udp_packet(remote_ct, r)
+    print(r)
+
+
+def test_tou_data_packet_make_and_parse():
+    print('test tou packet...\n')
+    from ir.protocol.tou import PacketMaker, PacketParser
+
+    serial = 65536
+
+    # type 0
+    dest_af = ('192.168.1.1', 33333)
+    packet = PacketMaker.make_tou_packet(serial, 0, dest_af=dest_af)
+    res = PacketParser.parse_tou_packet(packet)
+    print(packet)
+    print(res)
+    print('-------------------')
+
+    # type 1
+    conn_status = 3
+    packet = PacketMaker.make_tou_packet(serial, 1, conn_status=conn_status)
+    res = PacketParser.parse_tou_packet(packet)
+    print(packet)
+    print(res)
+    print('-------------------')
+
+    # type 2
+    data_serial = 32767
+    data = b':aaaaaaaaaaaaaaaaaaaa:'
+    packet = PacketMaker.make_tou_packet(serial, 2,
+                                         data_serial=data_serial,
+                                         data=data)
+    res = PacketParser.parse_tou_packet(packet)
+    print(packet)
+    print(res)
+    print('-------------------')
+
+    # type 3
+    ack_type = 1
+    recvd_serial = 1023
+    packet = PacketMaker.make_tou_packet(serial, 3,
+                                         ack_type=ack_type,
+                                         recvd_serial=recvd_serial)
+    res = PacketParser.parse_tou_packet(packet)
+    print(packet)
+    print(res)
+    print('-------------------')
+
+    # type 4
+    lost_serial = 2047
+    packet = PacketMaker.make_tou_packet(serial, 4, lost_serial=lost_serial)
+    res = PacketParser.parse_tou_packet(packet)
+    print(packet)
+    print(res)
+
+
 if __name__ == '__main__':
     # test_cryptor_reset_all_cipher()
     # test_iv_all_cipher()
+    # test_stream()
 
-    test_stream()
+    # test_tcp_fpacket_make_and_parse()
+    # test_udp_packet_make_and_parse()
+    test_tou_data_packet_make_and_parse()
