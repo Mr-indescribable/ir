@@ -48,8 +48,8 @@ class TCPHandler():
         if self._is_local:
             self._iv_len = self._config.get('iv_len') or 32
             self._iv = os.urandom(self._iv_len)
-            self._remote_ip = self._config.get('server_addr')
-            self._remote_port = self._config.get('server_tcp_port')
+            self._remote_ip = self._config.get('remote_addr')
+            self._remote_port = self._config.get('remote_tcp_port')
             self._remote_af = (self._remote_ip, self._remote_port)
             self._dest_af = None
             self._cryptor = Cryptor(self._config.get('cipher_name'),
@@ -330,7 +330,7 @@ class TCPHandler():
         if self._is_local:
             if not (self._remote_ip and self._remote_port):
                 raise ValueError(
-                        "Invalid configuration: server_addr/server_tcp_port")
+                        "Invalid configuration: remote_addr/remote_tcp_port")
         else:
             if not (self._remote_ip and self._remote_port):
                 logging.info("[TCP] Got invalid dest info, do destroy")
@@ -425,13 +425,13 @@ class UDPHandler():
         self._min_salt_len = config.get('udp_min_salt_len') or 4
         self._max_salt_len = config.get('udp_max_salt_len') or 32
         if self._is_local:
-            server_addr = config.get('server_addr')
-            server_port = config.get('server_udp_port')
-            if not (server_addr and server_port):
-                logging.error('invalid remote udp server configuration')
+            remote_addr = config.get('remote_addr')
+            remote_port = config.get('remote_udp_port')
+            if not (remote_addr and remote_port):
+                logging.error('[UDP] Invalid remote udp server configuration')
                 import sys
-                sys.exit()
-            self._remote_af = (server_addr, server_port)
+                sys.exit(1)
+            self._remote_af = (remote_addr, remote_port)
 
         self._client_sock = self._create_client_sock()
         if not self._client_sock:

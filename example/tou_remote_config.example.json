@@ -2,6 +2,7 @@
 	"listen_addr": "0.0.0.0",
 	"listen_tcp_port": 6040,
 	"listen_udp_port": 6050,
+	"tou_listen_udp_port": 6060,
 
 	"cipher_name": "aes-256-gcm",
 	"passwd": "An indescribable password",

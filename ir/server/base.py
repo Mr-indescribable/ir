@@ -10,7 +10,6 @@ import time
 from threading import Thread
 
 from ir import tools
-from ir.handler import TCPHandler, UDPHandler, UDPMultiTransmitHandler
 from ir.crypto import Cryptor, preload_crypto_lib
 from ir.protocol.base import IVManager, PacketParser
 
@@ -35,11 +34,29 @@ class ServerMixin(object):
     _is_local = False
 
     def __init__(self, config_path):
+        self._before_init()
         self._config = self._read_config(config_path)
+        self._load_handler()
         self._local_sock = self._init_socket()
         self._local_sock_fd = self._local_sock.fileno()
         self._epoll = select.epoll()
         self._epoll.register(self._local_sock_fd, self._poll_mode)
+        self._after_init()
+
+    def _before_init(self):
+        pass
+
+    def _after_init(self):
+        pass
+
+    def _load_handler(self):
+        from ir.handler.base import (TCPHandler,
+                                     UDPHandler,
+                                     UDPMultiTransmitHandler)
+
+        self.TCPHandler = TCPHandler
+        self.UDPHandler = UDPHandler
+        self.UDPMultiTransmitHandler = UDPMultiTransmitHandler
 
     def _read_config(self, config_path):
         return tools.Initer.init_from_config_file(config_path,
@@ -122,8 +139,8 @@ class TCPServer(ServerMixin):
                 conn, src = self._local_sock.accept()
                 logging.info('[TCP] Accepted connection from %s:%d, fd: %d' %\
                                                         (*src, conn.fileno()))
-                TCPHandler(self, conn, src, self._epoll,
-                           self._config, self._is_local)
+                self.TCPHandler(self, conn, src, self._epoll,
+                                self._config, self._is_local)
             except (OSError, IOError) as e:
                 error_no = tools.errno_from_exception(e)
                 if error_no in (errno.EAGAIN, errno.EINPROGRESS,
@@ -197,7 +214,8 @@ class UDPServer(ServerMixin):
 
         if (self._config.get('udp_multi_remote') or
                 self._config.get('udp_multi_source')):
-            self._mth = UDPMultiTransmitHandler(self._config, self._is_local)
+            self._mth = self.UDPMultiTransmitHandler(self._config,
+                                                     self._is_local)
             self._multi_transmit = True
             if not self._is_local:
                 self._mkey_2_handler = {}
@@ -273,47 +291,53 @@ class UDPServer(ServerMixin):
             self._excl.new_cryptor_b = None
             logging.info('[IV_MNG] Updated cryptor for %s' % src_af[0])
 
-    def _server_socket_recv(self):
-        if self._is_local:
-            data, anc, f, src = self._local_sock.recvmsg(UDP_BUFFER_SIZE,
-                                                         socket.CMSG_SPACE(24))
-            sock_opt = tools.unpack_sockopt(anc[0][2])
-            dest = ('.'.join([str(u) for u in sock_opt[2:]]), sock_opt[1])
-            return data, src, dest
-        else:
-            data, src = self._local_sock.recvfrom(UDP_BUFFER_SIZE)
-            cryptor = self._excl.current_cryptor
+    def _local_server_socket_recv(self):
+        data, anc, f, src = self._local_sock.recvmsg(UDP_BUFFER_SIZE,
+                                                     socket.CMSG_SPACE(24))
+        sock_opt = tools.unpack_sockopt(anc[0][2])
+        dest = ('.'.join([str(u) for u in sock_opt[2:]]), sock_opt[1])
+        return data, src, dest
+
+    def _remote_server_socket_recv(self):
+        data, src = self._local_sock.recvfrom(UDP_BUFFER_SIZE)
+        cryptor = self._excl.current_cryptor
+        res = PacketParser.parse_udp_packet(cryptor, data)
+        if not res['valid']:
+            err_msg = '[UDP] Got invalid packet from %s:%d' % src
+            if not (self._excl.old_cryptor and cryptor != self._excl.old_cryptor):
+                logging.info(err_msg)
+                return None, None, None
+
+            cryptor = self._excl.old_cryptor
             res = PacketParser.parse_udp_packet(cryptor, data)
             if not res['valid']:
-                err_msg = '[UDP] Got invalid packet from %s:%d' % src
-                if not (self._excl.old_cryptor and cryptor != self._excl.old_cryptor):
-                    logging.info(err_msg)
-                    return None, None, None
-                cryptor = self._excl.old_cryptor
+                cryptor = self._excl._default_cryptor
                 res = PacketParser.parse_udp_packet(cryptor, data)
                 if not res['valid']:
-                    cryptor = self._excl._default_cryptor
-                    res = PacketParser.parse_udp_packet(cryptor, data)
-                    if not res['valid']:
-                        logging.info(err_msg)
-                        return None, None, None
+                    logging.info(err_msg)
+                    return None, None, None
 
-            if self._multi_transmit:
-                res, is_duplicate = self._mth.handle_recv(res)
-                if is_duplicate:
-                    logging.debug('[UDP_MT] Dropped duplicate packet')
-                    return None, src, res['dest_af']
+        if self._multi_transmit:
+            res, is_duplicate = self._mth.handle_recv(res)
+            if is_duplicate:
+                logging.debug('[UDP_MT] Dropped duplicate packet')
+                return None, src, res['dest_af']
 
-            # local lost the iv
-            if (res['iv'] and cryptor == self._excl._default_cryptor and
-                self._excl.current_cryptor != self._excl._default_cryptor and
-                self._excl.old_cryptor != self._excl._default_cryptor):
-                self._excl.reset()
+        # local lost iv
+        if (res['iv'] and cryptor == self._excl._default_cryptor and
+            self._excl.current_cryptor != self._excl._default_cryptor and
+            self._excl.old_cryptor != self._excl._default_cryptor):
+            self._excl.reset()
 
-            decrypted_by_nc = cryptor == self._excl.nc_in_progress
-            self._remote_manage_iv(src, res['iv'], decrypted_by_nc)
-            return res['data'], src, res['dest_af']
-        return None, None, None
+        decrypted_by_nc = cryptor == self._excl.nc_in_progress
+        self._remote_manage_iv(src, res['iv'], decrypted_by_nc)
+        return res['data'], src, res['dest_af']
+
+    def _server_socket_recv(self):
+        if self._is_local:
+            return self._local_server_socket_recv()
+        else:
+            return self._remote_server_socket_recv()
 
     def handle_event(self, fd, evt):
         if fd == self._local_sock_fd:
@@ -334,9 +358,10 @@ class UDPServer(ServerMixin):
                     mkey = self._gen_handler_mkey(src, dest)
                     handler = self._mkey_2_handler.get(mkey)
                     if not (handler and handler.update_last_call_time()):
-                        handler = UDPHandler(src, dest, self, self._local_sock,
-                                             self._epoll, self._config,
-                                             self._is_local, mkey=mkey)
+                        handler = self.UDPHandler(src, dest, self,
+                                                  self._local_sock,
+                                                  self._epoll, self._config,
+                                                  self._is_local, mkey=mkey)
                     if data:
                         handler.handle_local_recv(data)
                     else:
@@ -345,9 +370,10 @@ class UDPServer(ServerMixin):
                     key = self._gen_handler_key(src, dest)
                     handler = self._key_2_handler.get(key)
                     if not (handler and handler.update_last_call_time()):
-                        handler = UDPHandler(src, dest, self, self._local_sock,
-                                             self._epoll, self._config,
-                                             self._is_local, key)
+                        handler = self.UDPHandler(src, dest, self,
+                                                  self._local_sock,
+                                                  self._epoll, self._config,
+                                                  self._is_local, key)
                         self._key_2_handler[key] = handler
                     handler.handle_local_recv(data)
         else:

@@ -23,9 +23,9 @@ ir的启动脚本并没有提供daemon模式，后台运行需要借助其它工
 
 |Tag|                 字段名                  |                                   描述                                |
 |---|-----------------------------------------|-----------------------------------------------------------------------|
-| L |              server\_addr               |                            指定远程服务器地址                         |
-| L |           server\_tcp\_port             |                          指定远程服务端TCP端口                        |
-| L |           server\_udp\_port             |                          指定远程服务端UDP端口                        |
+| L |              remote\_addr               |                            指定远程服务器地址                         |
+| L |           remote\_tcp\_port             |                          指定远程服务端TCP端口                        |
+| L |           remote\_udp\_port             |                          指定远程服务端UDP端口                        |
 |L&R|              listen\_addr               |                            指定本地监听地址                           |
 |L&R|           listen\_tcp\_port             |                          指定本地监听的TCP端口                        |
 |L&R|           listen\_udp\_port             |                          指定本地监听的UDP端口                        |
@@ -75,9 +75,9 @@ ir的启动脚本并没有提供daemon模式，后台运行需要借助其它工
 
 ```json
 {
-  "server_addr": "1.1.1.1",
-  "server_tcp_port": 10,
-  "server_udp_port": 20,
+  "remote_addr": "1.1.1.1",
+  "remote_tcp_port": 10,
+  "remote_udp_port": 20,
   "listen_addr": "127.0.0.1",
   "listen_tcp_port": 100,
   "listen_udp_port": 200,
@@ -220,8 +220,8 @@ ir的启动脚本并没有提供daemon模式，后台运行需要借助其它工
 
 ```json
 {
-  "server_addr": "1.1.1.1",
-  "server_tcp_port": 10,
+  "remote_addr": "1.1.1.1",
+  "remote_tcp_port": 10,
   "listen_addr": "127.0.0.1",
   "listen_tcp_port": 100,
   "listen_udp_port": 200,
