@@ -2,17 +2,24 @@
 # coding: utf-8
 
 
-from ir.server.base import TCPServer, UDPServer
+from ir.server import base, tou
 
 
-__all__ = ['RemoteTCPServer', 'RemoteUDPServer']
-
-
-class RemoteTCPServer(TCPServer):
+class TCPServer(base.TCPServer):
 
     _is_local = False
 
 
-class RemoteUDPServer(UDPServer):
+class UDPServer(base.UDPServer):
+
+    _is_local = False
+
+
+class TOUTCPServer(tou.TCPServer):
+
+    _is_local = False
+
+
+class TOUUDPServer(tou.UDPServer):
 
     _is_local = False

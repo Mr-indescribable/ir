@@ -1,7 +1,7 @@
 #!/usr/bin/python3.6
 #coding: utf-8
 
-import select
+import socket
 import logging
 
 from ir.server.base import TCPServer as BaseTCPServer
@@ -16,12 +16,16 @@ UDP_BUFFER_SIZE = 65536
 
 class TCPServer(BaseTCPServer):
 
+    _server_type = 'TOU_TCP'
+
     def _load_handler(self):
         from ir.handler.tou import TCPHandler
         self.TCPHandler = TCPHandler
 
 
 class UDPServer(BaseUDPServer):
+
+    _server_type = 'TOU_UDP'
 
     def _load_handler(self):
         from ir.handler.tou import UDPHandler

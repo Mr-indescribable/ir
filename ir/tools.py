@@ -9,22 +9,27 @@ import logging
 
 class Initer(object):
 
+    # server_type: log_type
+    log_type_map = {'TCP': 'tcp',
+                    'UDP': 'udp',
+                    'TOU_TCP': 'tou_tcp',
+                    'TOU_UDP': 'tou_udp'}
+
     @classmethod
     def init_from_config_file(cls, config_path, server_type):
         config = cls.read_config_file(config_path)
         log_file = config.get('log_file')
         if isinstance(log_file, dict):
             try:
-                if server_type == 'TCP':
-                    log_file = log_file['tcp']
-                elif server_type == 'UDP':
-                    log_file = log_file['udp']
+                log_type = cls.log_type_map[server_type]
+                log_file = log_file[log_type]
             except KeyError as e:
                 log_file = -1
         elif log_file is None:
             pass
         else:
             log_file = -1
+
         if log_file == -1:
             raise Exception('Invalid config: log_file')
                 
@@ -47,13 +52,12 @@ class Initer(object):
     def init_logger(cls, lv, log_file=None):
         fmt = '%(asctime)s %(levelname)-8s %(message)s'
         dtfmt = '%Y-%m-%d %H:%M:%S'
-        lv_map = {
-                'debug': logging.DEBUG,
-                'info': logging.INFO,
-                'warn': logging.WARN,
-                'warning': logging.WARN,
-                'error': logging.ERROR,
-                }
+        lv_map = {'debug': logging.DEBUG,
+                  'info': logging.INFO,
+                  'warn': logging.WARN,
+                  'warning': logging.WARN,
+                  'error': logging.ERROR}
+
         level = lv_map.get(lv)
         if not level:
             raise Exception('Invalid config: log_level')

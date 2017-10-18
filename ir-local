@@ -1,20 +1,56 @@
 #!/usr/bin/python3.6
 # coding: utf-8
 
+import sys
 import argparse
 from multiprocessing import Process
 
-from ir.local import LocalTCPServer, LocalUDPServer
+from ir import local
 
 
-def run_tcp(config_path):
-    server = LocalTCPServer(config_path)
-    server.run()
+def run_base(config_path):
+    def run_base_tcp():
+        base_tcp_server = local.TCPServer(config_path)
+        base_tcp_server.run()
+
+    def run_base_udp():
+        base_udp_server = local.UDPServer(config_path)
+        base_udp_server.run()
+
+    base_tcp_proc = Process(target=run_base_tcp)
+    base_udp_proc = Process(target=run_base_udp)
+
+    base_tcp_proc.start()
+    base_udp_proc.start()
+
+    base_tcp_proc.join()
+    base_udp_proc.join()
 
 
-def run_udp(config_path):
-    server = LocalUDPServer(config_path)
-    server.run()
+def run_tou(config_path):
+    def run_tou_tcp():
+        tou_tcp_server = local.TOUTCPServer(config_path)
+        tou_tcp_server.run()
+
+    def run_tou_udp():
+        tou_udp_server = local.TOUUDPServer(config_path)
+        tou_udp_server.run()
+
+    def run_base_udp():
+        base_udp_server = local.UDPServer(config_path)
+        base_udp_server.run()
+
+    tou_tcp_proc = Process(target=run_tou_tcp)
+    tou_udp_proc = Process(target=run_tou_udp)
+    base_udp_proc = Process(target=run_base_udp)
+
+    tou_tcp_proc.start()
+    tou_udp_proc.start()
+    base_udp_proc.start()
+
+    tou_tcp_proc.join()
+    tou_udp_proc.join()
+    base_udp_proc.join()
 
 
 if __name__ == '__main__':
@@ -26,21 +62,23 @@ if __name__ == '__main__':
             metavar='<config_file>',
             help='specify the config file',
             )
+    arg_parser.add_argument(
+            '--tou',
+            action='store_true',
+            help='activate TCP over UDP mode',
+            )
 
     args = arg_parser.parse_args()
+
     if not args.c:
         print('please specify the config file')
-        import sys
         sys.exit(1)
     config_path = args.c
 
     try:
-        tcp_server = Process(target=run_tcp, args=[config_path])
-        udp_server = Process(target=run_udp, args=[config_path])
-        tcp_server.start()
-        udp_server.start()
-        tcp_server.join()
-        udp_server.join()
+        if args.tou:
+            run_tou(config_path)
+        else:
+            run_base(config_path)
     except KeyboardInterrupt:
-        import sys
         sys.exit(0)
