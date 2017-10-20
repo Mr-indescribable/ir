@@ -1,7 +1,10 @@
 #!/usr/bin/python3.6
 #coding: utf-8
 
+import sched
+import select
 import struct
+from threading import Thread, Event
 
 from ir.protocol.base import AfConverter
 
@@ -270,3 +273,160 @@ class PacketParser():
         elif type_ == 4:
             res['lost_serial'] = struct.unpack('I', body)[0]
         return res
+
+
+class TOUAdapter():
+
+    ''' Overview
+
+        +---------------------+-------------+------------------------------+
+        |                     |             |                              |
+        |     +-------------> |     TOU     | -----------------------+     |
+        |     |               |             |              ^         |     |
+        |     |               | PacketMaker |              |         V     |
+        +------------+        |             |              |   +-----------+
+        |     |      |        +-------------+              |   |     |     |
+    --->|-----+      |                                     |   |     +-----|--->
+        |            |                                     |   |           |
+        |            |                   +------------+    |   |           |
+        |            |                   |            |    |   |           |
+        | TCPHandler |                   |    ARQ     |    |   |    UDP    |
+        |            |     TOUAdapter    |            |----+   |           |
+        | Interface  |                   | Controller |    |   | Interface |
+        |            |                   |            |    |   |           |
+        |            |                   +------------+    |   |           |
+        |            |                                     |   |           |
+    <---|-----+      |                                     |   |     +-----|<---
+        |     |      | +----------+     +--------------+   |   |     |     |
+        +------------+ |          |     |              |   |   +-----------+
+        |     ^        | TCP Data |     |     TOU      |   V         |     |
+        |     |        |          | <-- |              | <-----------+     |
+        |     +------- | Storage  |     | PacketParser |                   |
+        |              |          |     |              |                   |
+        +--------------+----------+-----+--------------+-------------------+
+    '''
+
+    def __init__(self, epoll, config, is_local):
+        self._serial = -1
+        self._db_serial = -1
+        self._epoll = epoll
+        self._config = config
+        self._is_local = is_local
+
+        self._udp_svr_port = config['tou_listen_udp_port']
+        self._max_serial = config.get('tou_max_packet_serial') or 65536
+        self._max_db_serial = config.get('tou_max_tcp_db_serial') or 65536
+
+        self._udp_sock = self._init_udp_socket()
+
+        # TCP Data Storage
+        if self._is_local:
+            self._stream_2_local = []
+        else:
+            self._stream_2_remote = []
+
+    def _next_serial(self):
+        serial = self._serial + 1
+        if serial > self._max_serial:
+            serial = 0
+        self._serial = serial
+        return serial
+
+    def _next_db_serial(self):
+        serial = self._db_serial + 1
+        if serial > self._max_db_serial:
+            serial = 0
+        self._db_serial = serial
+        return serial
+
+    def _init_udp_socket(self):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.setblocking(False)
+        sock.bind(('127.0.0.1', 0))
+        fd = sock.fileno()
+        logging.debug('[TOU] Adapter created UDP socket fd: %d' % fd)
+        return sock
+
+    def _handle_fpacket(self, dest_af):
+        serial = self._next_serial()
+        packet = PacketMaker.make_tou_packet(serial, 0, dest_af)
+
+    def _tcp_in(self, data):
+        pass
+
+    def _tcp_out(self):
+        pass
+
+    def _udp_in(self, packet):
+        pass
+
+    def _udp_out(self, packet):
+        # target = ('127.0.0.1', self._udp_svr_port)
+        # self._udp_sock.sendto(packet, target)
+        pass
+
+    @property
+    def udp_fd(self):
+        return self._udp_sock.fileno()
+
+
+class ARQController():
+
+    '''The selective repeat ARQ is the most suitable mode for IR TOU.
+
+    We have continuous serial numbers in all of TOU packets and
+    another bunch of serial numbers for all of TCP data blocks.
+    We just need to make sure that every serial number has been received.
+    '''
+
+
+class ARQRpeater(Thread):
+
+    def __init__(self, tou_udp_svr_port):
+        Thread.__init__(self, daemon=True)
+
+        self._running = False
+        self._dest_af = ('127.0.0.1', tou_udp_svr_port)
+        self._evt = Event()
+        self._schd = sched.scheduler()
+        self.task_list = []
+        self.task_map = {}    # {tou_packet_serial: task}
+
+    def _activate(self):
+        if not self.running:
+            self.evt.set()
+
+    def _add_task(self, interval, func, serial):
+        def task():
+            # I don't need parameters here
+            # so I removed the parameters "args" and "kwargs"
+            if task in self.task_list:
+                # 此处需要对interval加入随机的小幅度偏移，不能使用固定值
+                func()
+                self._schd.enter(interval, 1, task)
+
+        self.task_list.append(task)
+        self.task_map[serial] = task
+        task()
+        self._activate()
+
+    def add_repetition(self, interval, serial, packet, sock):
+        def send():
+            sock.sendto(packet, self._dest_af)
+
+        self._add_task(interval, send, serial)
+
+    def rm_repetition(self, serial):
+        task = self.task_map.get(serial)
+        if task and task in self.task_list:
+            self.task_list.remove(task)
+            del(self.task_map[serial])
+
+    def run(self):
+        while True:
+            self.evt.wait()
+            self.running = True
+            self.s.run()
+            self.evt.clear()
+            self.running = False

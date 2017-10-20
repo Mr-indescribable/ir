@@ -1,6 +1,7 @@
 #!/usr/bin/python3.6
 #coding: utf-8
 
+import sys
 import socket
 import logging
 
@@ -17,6 +18,9 @@ UDP_BUFFER_SIZE = 65536
 class TCPServer(BaseTCPServer):
 
     _server_type = 'TOU_TCP'
+
+    def _before_run(self):
+        logging.info('[TOU] Running TCP server under TCP over UDP mode')
 
     def _load_handler(self):
         from ir.handler.tou import TCPHandler
@@ -37,7 +41,6 @@ class UDPServer(BaseUDPServer):
     def _after_init(self):
         def _exit():
             logging.error('[TOU] Invalid TOU configuration.')
-            import sys
             sys.exit(1)
 
         tou_udp_pt = self._config.get('tou_listen_udp_port')
@@ -50,13 +53,15 @@ class UDPServer(BaseUDPServer):
                 _exit()
 
     def _init_socket(self, listen_addr=None, listen_port=None):
-        listen_addr = listen_addr or self._config['listen_addr']
+        listen_addr = listen_addr or '127.0.0.1'
         listen_port = listen_port or self._config['tou_listen_udp_port']
+        if not listen_port:
+            logging.error('[TOU] Invalid TOU config: tou_listen_udp_port')
+            sys.exit(1)
         addr_info = socket.getaddrinfo(listen_addr, listen_port, 0,
                                        socket.SOCK_DGRAM, socket.SOL_UDP)
         if len(addr_info) == 0:
             logging.error('[TOU] failed to do getaddrinfo() for tou_udp_server')
-            import sys
             sys.exit(1)
         af, stype, proto, canname, sa = addr_info[0]
         sock = socket.socket(af, stype, proto)
