@@ -7,6 +7,7 @@ import logging
 
 from ir.server.base import TCPServer as BaseTCPServer
 from ir.server.base import UDPServer as BaseUDPServer
+from ir.protocol.tou import ARQRepeater
 
 
 __all__ = ['TCPServer', 'UDPServer']
@@ -15,21 +16,42 @@ __all__ = ['TCPServer', 'UDPServer']
 UDP_BUFFER_SIZE = 65536
 
 
+def after_init(self):
+    def _exit():
+        logging.error('[TOU] Invalid TOU configuration.')
+        sys.exit(1)
+
+    tou_udp_pt = self._config.get('tou_listen_udp_port')
+    if not isinstance(tou_udp_pt, int):
+        _exit()
+
+    if self._is_local:
+        tou_remote_udp_pt = self._config.get('tou_remote_udp_port')
+        if not isinstance(tou_remote_udp_pt, int):
+            _exit()
+
+
 class TCPServer(BaseTCPServer):
 
     _server_type = 'TOU_TCP'
 
-    def _before_run(self):
-        logging.info('[TOU] Running TCP server under TCP over UDP mode')
+    _after_init = after_init
 
     def _load_handler(self):
         from ir.handler.tou import TCPHandler
         self.TCPHandler = TCPHandler
 
+    def _before_run(self):
+        self._arq_repeater = ARQRepeater(self._config['tou_listen_udp_port'])
+        self._arq_repeater.start()
+        logging.info('[TOU] Running TCP server under TCP over UDP mode')
+
 
 class UDPServer(BaseUDPServer):
 
     _server_type = 'TOU_UDP'
+
+    _after_init = after_init
 
     def _load_handler(self):
         from ir.handler.tou import UDPHandler
@@ -37,20 +59,6 @@ class UDPServer(BaseUDPServer):
 
         self.UDPHandler = UDPHandler
         self.UDPMultiTransmitHandler = UDPMultiTransmitHandler
-
-    def _after_init(self):
-        def _exit():
-            logging.error('[TOU] Invalid TOU configuration.')
-            sys.exit(1)
-
-        tou_udp_pt = self._config.get('tou_listen_udp_port')
-        if not isinstance(tou_udp_pt, int):
-            _exit()
-
-        if self._is_local:
-            tou_remote_udp_pt = self._config.get('tou_remote_udp_port')
-            if not isinstance(tou_remote_udp_pt, int):
-                _exit()
 
     def _init_socket(self, listen_addr=None, listen_port=None):
         listen_addr = listen_addr or '127.0.0.1'

@@ -121,47 +121,50 @@ def test_tou_data_packet_make_and_parse():
 
     serial = 65536
 
+    print('tp0-------------------')
     # type 0
     dest_af = ('192.168.1.1', 33333)
-    packet = PacketMaker.make_tou_packet(serial, 0, dest_af=dest_af)
+    packet = PacketMaker.make_tou_packet(serial=serial, amount=10, type_=0,
+                                         dest_af=dest_af)
     res = PacketParser.parse_tou_packet(packet)
     print(packet)
     print(res)
-    print('-------------------')
 
+    print('tp1-------------------')
     # type 1
     conn_status = 3
-    packet = PacketMaker.make_tou_packet(serial, 1, conn_status=conn_status)
+    packet = PacketMaker.make_tou_packet(serial=serial, amount=11, type_=1,
+                                         conn_status=conn_status)
     res = PacketParser.parse_tou_packet(packet)
     print(packet)
     print(res)
-    print('-------------------')
 
+    print('tp2-------------------')
     # type 2
     data_serial = 32767
     data = b':aaaaaaaaaaaaaaaaaaaa:'
-    packet = PacketMaker.make_tou_packet(serial, 2,
-                                         data_serial=data_serial,
-                                         data=data)
+    packet = PacketMaker.make_tou_packet(serial=serial, amount=12, type_=2,
+                                         data_serial=data_serial, data=data)
     res = PacketParser.parse_tou_packet(packet)
     print(packet)
     print(res)
-    print('-------------------')
 
+    print('tp3-------------------')
     # type 3
     ack_type = 1
     recvd_serial = 1023
-    packet = PacketMaker.make_tou_packet(serial, 3,
+    packet = PacketMaker.make_tou_packet(serial=serial, type_=3,
                                          ack_type=ack_type,
                                          recvd_serial=recvd_serial)
     res = PacketParser.parse_tou_packet(packet)
     print(packet)
     print(res)
-    print('-------------------')
 
+    print('tp4-------------------')
     # type 4
     lost_serial = 2047
-    packet = PacketMaker.make_tou_packet(serial, 4, lost_serial=lost_serial)
+    packet = PacketMaker.make_tou_packet(serial=serial, amount=14, type_=4,
+                                         lost_serial=lost_serial)
     res = PacketParser.parse_tou_packet(packet)
     print(packet)
     print(res)

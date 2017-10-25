@@ -26,5 +26,13 @@
 
 	"udp_iv_change_rate": 0.001,
 	"udp_min_salt_len": 4,
-	"udp_max_salt_len": 32
+	"udp_max_salt_len": 32,
+
+	"tou_pkt_max_serial": 8192,
+	"tou_tcp_db_max_serial": 4096,
+	"tou_min_tu": 64,
+	"tou_max_tu": 4096,
+	"tou_arq_rto": 0.2,
+	"tou_max_upstm_window_size": 32,
+	"tou_max_dnstm_window_size": 128
 }
