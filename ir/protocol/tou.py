@@ -315,29 +315,29 @@ class TOUAdapter():
 
         +---------------------+-------------+------------------------------+
         |                     |             |                              |
-        |     +-------------> |     TOU     | -----------------------+     |
-        |     |               |             |              ^         |     |
-        |     |               | PacketMaker |              |         V     |
-        +------------+        |             |              |   +-----------+
-        |     |      |        +-------------+              |   |     |     |
-    --->|-----+      |                                     |   |     +-----|--->
-        |            |                                     |   |           |
-        |            |                   +------------+    |   |           |
-        |            |                   |            |    |   |           |
-        | TCPHandler |                   |    ARQ     |    |   |    UDP    |
-        |            |     TOUAdapter    |            |----+   |           |
-        | Interface  |                   | Controller |    |   | Interface |
-        |            |                   |            |    |   |           |
-        |            |                   +------------+    |   |           |
-        |            |                                     |   |           |
-    <---|-----+      |                                     |   |     +-----|<---
-        |     |      | +----------+     +--------------+   |   |     |     |
-        +------------+ |          |     |              |   |   +-----------+
-        |     ^        | TCP Data |     |     TOU      |   V         |     |
-        |     |        |          | <-- |              | <-----------+     |
-        |     +------- | Storage  |     | PacketParser |                   |
-        |              |          |     |              |                   |
-        +--------------+----------+-----+--------------+-------------------+
+        |     +-------------> |     TOU     |       +-------------+        |
+        |     |               |             |       |             |        |
+        |     |               | PacketMaker | ----->|-------------|--------|--->
+        +------------+        |             |       |             |        |
+        |     |      |        +-------------+       |     ARQ     |        |
+    --->|-----+      |                              |             |        |
+        |            |                              |  Interface  |        |
+        |            |                              |             |        |
+        |            |                         +----|-------------|<----+  |
+        | TCPHandler |                         |    |             |     |  |
+        |            |     TOUAdapter          |    +-------------+     |  |
+        | Interface  |                         |                        |  |
+        |            |                         |                        |  |
+        |            |                         |                        |  |
+        |            |                         |               +-----------+
+    <---|-----+      |                         V               |        |  |
+        |     |      | +----------+     +--------------+       |        +--|<---
+        +------------+ |          |     |              |       |    UDP    |
+        |     ^        | TCP Data |     |     TOU      |       |           |
+        |     |        |          | <-- |              |       | Interface |
+        |     +------- | Storage  |     | PacketParser |       |           |
+        |              |          |     |              |       |           |
+        +--------------+----------+-----+--------------+-------+-----------+
     '''
 
     def __init__(self, epoll, arq_repeater, config, is_local):
@@ -359,10 +359,10 @@ class TOUAdapter():
         self._max_wd_size = max_up_wd_size if is_local else max_dn_wd_size
 
         self._udp_sock = self._init_udp_socket()
-        self._arq_ctlr = ARQController(self, arq_repeater, self._udp_sock,
-                                       self._udp_svr_port, self._min_tu,
-                                       self._max_tu, self._max_wd_size)
-        self._buffer_size = self._arq_ctlr.max_db_size
+        self._arq_intf = ARQInterface(self, arq_repeater, self._udp_sock,
+                                      self._udp_svr_port, self._min_tu,
+                                      self._max_tu, self._max_wd_size)
+        self._buffer_size = self._arq_intf.max_db_size
 
         # TCP Data Storage
         self._stream_buffer = []
@@ -399,28 +399,55 @@ class TOUAdapter():
         serial = self._next_serial()
         packet = PacketMaker.make_tou_packet(serial=serial, type_=0,
                                              dest_af=dest_af)
-        self._udp_out(serial, packet)
+        self._arq_intf.send_packet(packet, serial)
 
     def tcp_in(self, data):
-        pass
+        self._arq_intf.transmit_data_block(data)
 
     def tcp_out(self):
-        pass
+        if self._stream_buffer:
+            data = b''.join(self._stream_buffer)
+            self._stream_buffer = []
+            return data
+        return b''
 
+    # udp output interface is written in ARQInterface
     def udp_in(self, packet):
+        packet = PacketParser.parse_tou_packet(packet)
+        self._arq_intf.on_packet_recv(packet)
+
+        if packet['type'] == 0:
+            self._handle_recv_tp0(packet)
+        elif packet['type'] == 1:
+            self._handle_recv_tp1(packet)
+        elif packet['type'] == 2:
+            self._handle_recv_tp2(packet)
+        elif packet['type'] == 3:
+            self._handle_recv_tp3(packet)
+        elif packet['type'] == 4:
+            self._handle_recv_tp4(packet)
+
+    def _handle_recv_tp0(self, packet):
         pass
 
-    def udp_out(self, serial, packet):
-        interval = self.rand_rpt_interval()
-        self._arq_repeater.add_repetition(interval, serial,
-                                          packet, self._udp_sock)
+    def _handle_recv_tp1(self, packet):
+        pass
+
+    def _handle_recv_tp2(self, packet):
+        pass
+
+    def _handle_recv_tp3(self, packet):
+        pass
+
+    def _handle_recv_tp4(self, packet):
+        pass
 
     @property
     def udp_fd(self):
         return self._udp_sock.fileno()
 
 
-class ARQController():
+class ARQInterface():
 
     '''The selective repeat ARQ is the most suitable mode for IR TOU.
 
@@ -441,15 +468,30 @@ class ARQController():
         self._max_wd_size = max_wd_size    # max window size
         self._max_db_size = max_wd_size * max_tu    # max data block size
 
-        self._serial_sent = -1
-        self._serial_recv = -1
+        self._last_recv_serial = -1
         self._window = None
+        self._receiver = None
+        # a locked ARQInterface can only transmit ACK/UNA packets
+        self.__locked = False
 
-    def transmit_data_block(self, block):
-        interval = self._tou_adapter.rand_rpt_interval()
+    def transmit_data_block(self, data_block):
+        if self.__locked:
+            logging.warn('[TOU] Try to send data when ARQInterface locked')
+            return
+        self.__locked = True
         self._window = Window(self._max_wd_size, self._min_tu, self._max_tu,
-                              self._tou_adapter, self._arq_repeater, interval,
-                              data_block=block)
+                              self._arq_repeater, self._tou_adapter,
+                              data_block=data_block)
+        self._window.transmit()
+
+    def send_packet(self, packet, serial):
+        if self.__locked:
+            logging.warn('[TOU] Try to send packet when ARQInterface locked')
+            return
+        self.__locked = True
+        self._window = Window(self._max_wd_size, self._min_tu, self._max_tu,
+                              self._arq_repeater, self._tou_adapter,
+                              packet=packet, serial=serial)
         self._window.transmit()
 
     def send_ack(self, recvd_serial):
@@ -462,29 +504,105 @@ class ARQController():
                                              recvd_serial=recvd_serial)
         self.udp_sock.sendto(packet, self._tou_udp_svr_af)
 
-    def on_pkt_recv(self, packet):
-        pass
+    def on_packet_recv(self, packet):
+        '''Handle ARQ here
+
+        :params: the parsed data packet. Type: dict
+        '''
+
+        srl = packet['serial']
+        type_ = packet['type']
+
+        # type == 3: ACK/UNA
+        # if we don't have a window instance here, then the ack must be invalid
+        if type_ == 3 and self._window:
+            if self._window.received_correct_ack(srl):
+                if self._window.completed:
+                    self._window = None
+                    self.__locked = False
+        # type != 3 stream data or other information packet
+        else:
+            if not self._receiver:
+                self._receiver = Receiver(packet['amount'],
+                                          self.last_recv_serial+1)
+
+            if type_ == 3:
+                if self._receiver.received_correct_packet(packet):
+                    # send ACK/UNA
+                    pass
+            else:
+                if self._receiver.received_correct_packet(packet):
+                    self.send_ack(srl)
 
     @property
     def max_db_size(self):
         return self._max_db_size
 
+    @property
+    def locked(self):
+        return self.__locked
 
-class Window():
 
-    def __init__(self, max_window_size, min_tu, max_tu,
-                       tou_adapter, arq_repeater, rpt_interval,
+class Receiver():
+
+    def __init__(self, amount, first_serial):
+        self._amount = amount
+        self._first = first_serial
+
+        end = self._first + amount
+        self._serials = [s for s in range(self._first, end)]
+        self._unrecvd_serials = list(serials)
+
+        self.__completed = False
+        self._buffer = {}    # {serial: packet}
+
+    def received_correct_packet(self, packet):
+        srl = packet['serial']
+        if srl in self._unrecvd_serial:
+            self._unrecvd_serial.remove(srl)
+            self._buffer[srl] = packet
+
+            if not self._unrecvd_serial:
+                self.__completed = True
+            return True
+        return False
+
+    # only for stream data
+    def dump_stream(self):
+        data = b''
+        data_map = {}
+        for srl in self._serials:
+            packet = self._buffer[srl]
+            db_srl = packet['data_serial']
+            db = packet['data']
+            data += db
+            data_map[db_srl] = db
+        return data, data_map
+
+    def dump(self):
+        return self._buffer
+
+    @property
+    def completed(self):
+        return self.__completed
+
+
+class Window():    # or sender, transmitter, whatever
+
+    def __init__(self, max_wd_size, min_tu, max_tu, tou_adapter, arq_repeater,
                        data_block=None, packet=None, serial=None):
         self._size = None
+        self.__completed = False
         self._packets = {}
-        self.transmitted_serial = []
+        # Unacknowledged serials, they are also the repeating serials.
+        self.unackd_serials = []
 
         self._max_tu = max_tu
         self._min_tu = min_tu
-        self._max_wd_size = max_window_size
+        self._max_wd_size = max_wd_size
         self._tou_adapter = tou_adapter
         self._arq_repeater = arq_repeater
-        self._rpt_interval = rpt_interval
+        self._rpt_interval = self._tou_adapter.rand_rpt_interval()
 
         # Actually, data_block and packet won't be passed in at the same time.
         # This serial is belong to the packet.
@@ -562,7 +680,21 @@ class Window():
         for serial, packet in self._packets.items():
             self._repeater.add_repetition(self._rpt_interval, serial,
                                           packet, self._udp_sock)
-            self.transmitted_serial.append(serial)
+            self.unackd_serials.append(serial)
+
+    def received_correct_ack(self, serial):
+        if serial in self.unackd_serials:
+            self.unackd_serials.remove(serial)
+            self._repeater.rm_repetition(serial)
+
+            if not self.unackd_serials:
+                self.__completed = True
+            return True
+        return False
+
+    @property
+    def completed(self):
+        return self.__completed
 
 
 class ARQRepeater(Thread):

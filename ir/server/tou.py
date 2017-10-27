@@ -27,7 +27,10 @@ def after_init(self):
 
     if self._is_local:
         tou_remote_udp_pt = self._config.get('tou_remote_udp_port')
+        tou_remote_tcp_pt = self._config.get('tou_remote_tcp_port')
         if not isinstance(tou_remote_udp_pt, int):
+            _exit()
+        if not isinstance(tou_remote_tcp_pt, int):
             _exit()
 
 
@@ -45,6 +48,32 @@ class TCPServer(BaseTCPServer):
         self._arq_repeater = ARQRepeater(self._config['tou_listen_udp_port'])
         self._arq_repeater.start()
         logging.info('[TOU] Running TCP server under TCP over UDP mode')
+
+    def _init_socket(self, listen_port=None, so_backlog=1024):
+        listen_addr = '127.0.0.1'
+        listen_port = listen_port or self._config['tou_listen_tcp_port']
+
+        if self._is_local:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.setsockopt(socket.SOL_TCP, socket.TCP_NODELAY, 1)
+            sock.setblocking(False)
+            sock.bind((listen_addr, listen_port))
+            sock.listen(so_backlog)
+        else:
+            # as remote,  TCPServer need to communicate with UDPServer with UDP
+            # so, it's a UDP socket
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) 
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.setblocking(False)
+            sock.bind((listen_addr, listen_port))
+
+        logging.info(
+                '[TOU] TCP Server is listening at %s:%d' % (listen_addr,
+                                                            listen_port)
+                )
+        return sock
+
 
 
 class UDPServer(BaseUDPServer):
@@ -83,5 +112,9 @@ class UDPServer(BaseUDPServer):
 
     def _local_server_socket_recv(self):
         data, src = self._local_sock.recvfrom(UDP_BUFFER_SIZE)
-        dest = ('127.0.0.1', self._tou_local_fp)
+        if self._is_local:
+            port = self._config['tou_remote_tcp_port']
+        else:
+            port = self._config['tou_listen_tcp_port']
+        dest = ('127.0.0.1', port)
         return data, src, dest
