@@ -1,6 +1,7 @@
 #!/usr/bin/python3.6
 #coding: utf-8
 
+import time
 import sched
 import select
 import struct
@@ -137,7 +138,7 @@ Field Description:
                         The status of the tcp connection.
                         Range: 0x00 - 0xFF
                         Values:
-                            0x00: didn't connect
+                            0x00: not connected
                             0x01: connecting
                             0x02: connected
                             0x03: disconnected
@@ -325,7 +326,7 @@ class TOUAdapter():
         |            |                              |             |        |
         |            |                         +----|-------------|<----+  |
         | TCPHandler |                         |    |             |     |  |
-        |            |     TOUAdapter          |    +-------------+     |  |
+        |            |       TOUAdapter        |    +-------------+     |  |
         | Interface  |                         |                        |  |
         |            |                         |                        |  |
         |            |                         |                        |  |
@@ -340,32 +341,35 @@ class TOUAdapter():
         +--------------+----------+-----+--------------+-------+-----------+
     '''
 
-    def __init__(self, epoll, arq_repeater, config, is_local):
+    def __init__(self, arq_repeater, config, is_local, src):
         self._serial = -1
         self._db_serial = -1
-        self._epoll = epoll
+        self._stream_buffer = []
+        self._fb_last_recv_time = None
+        self._sent_disconnect_pkt = False
+        self._disconnection_confirmed = False
+
         self._arq_repeater = arq_repeater
         self._config = config
         self._is_local = is_local
+        self._src = src
 
-        self._udp_svr_port = config['tou_listen_udp_port']
+        local_udp_port = config['tou_listen_udp_port']
+        self._udp_dest_af = ('127.0.0.1', local_udp_port) if is_local else src
         self._max_serial = config.get('tou_pkt_max_serial') or 4096
         self._max_db_serial = config.get('tou_tcp_db_max_serial') or 4096
         self._min_tu = config.get('tou_min_tu') or 64
         self._max_tu = config.get('tou_max_tu') or 4096
-        self._rto = config.get('tou_arq_rto') or 0.2
+        self._rto = config.get('tou_arq_rto') or 0.25
         max_up_wd_size = config.get('tou_max_upstm_window_size') or 32
         max_dn_wd_size = config.get('tou_max_dnstm_window_size') or 128
         self._max_wd_size = max_up_wd_size if is_local else max_dn_wd_size
 
         self._udp_sock = self._init_udp_socket()
-        self._arq_intf = ARQInterface(self, arq_repeater, self._udp_sock,
-                                      self._udp_svr_port, self._min_tu,
-                                      self._max_tu, self._max_wd_size)
-        self._buffer_size = self._arq_intf.max_db_size
-
-        # TCP Data Storage
-        self._stream_buffer = []
+        self._arq_intf = ARQInterface(self._max_wd_size, self._min_tu,
+                                      self._max_tu self, arq_repeater,
+                                      self._udp_sock, self._udp_dest_af)
+        self.max_db_size = self._arq_intf.max_db_size
 
     def _next_serial(self):
         serial = self._serial + 1
@@ -383,7 +387,7 @@ class TOUAdapter():
         return serial
 
     def rand_rpt_interval(self):
-        intv = random.uniform(-0.015, 0.015) + self._rpt_interval
+        intv = random.uniform(-0.015, 0.015) + self._rto
         return intv if intv > 0.01 else 0.01
 
     def _init_udp_socket(self):
@@ -395,56 +399,92 @@ class TOUAdapter():
         logging.debug('[TOU] Adapter created UDP socket fd: %d' % fd)
         return sock
 
-    def handle_fpacket(self, dest_af):
+    def connect(self, dest_af):
         serial = self._next_serial()
         packet = PacketMaker.make_tou_packet(serial=serial, type_=0,
                                              dest_af=dest_af)
         self._arq_intf.send_packet(packet, serial)
 
-    def tcp_in(self, data):
-        self._arq_intf.transmit_data_block(data)
+    def disconnect(self):
+        if not self._sent_disconnect_pkt:
+            serial = self._next_serial()
+            packet = PacketMaker.make_tou_packet(serial=serial, type_=1,
+                                                 conn_status=3)
+            self._arq_intf.send_packet(packet, serial)
+            self._sent_disconnect_pkt = True
 
-    def tcp_out(self):
+    def __send(self, data=b''):
         if self._stream_buffer:
-            data = b''.join(self._stream_buffer)
+            data = b''.join(self._stream_buffer) + data
             self._stream_buffer = []
-            return data
-        return b''
+            if len(data) > self._max_db_size:
+                data_2_send = data[:self._max_db_size]
+                data_2_store = data[self._max_db_size:]
+                self._stream_buffer.append(data_2_store)
+        else:
+            data_2_send = data
 
-    # udp output interface is written in ARQInterface
+        if data_2_send:
+            self._arq_intf.transmit_data_block(data_2_send)
+
+    def send_buffered(self):
+        if not self._arq_intf.locked:
+            self.__send()
+            return True
+        return False
+
+    def tcp_in(self, data):
+        if self._arq_intf.locked:
+            self._stream_buffer.append(data)
+        else:
+            self.__send(data)
+
     def udp_in(self, packet):
         packet = PacketParser.parse_tou_packet(packet)
-        self._arq_intf.on_packet_recv(packet)
 
-        if packet['type'] == 0:
-            self._handle_recv_tp0(packet)
-        elif packet['type'] == 1:
-            self._handle_recv_tp1(packet)
-        elif packet['type'] == 2:
-            self._handle_recv_tp2(packet)
-        elif packet['type'] == 3:
-            self._handle_recv_tp3(packet)
-        elif packet['type'] == 4:
-            self._handle_recv_tp4(packet)
+        if self._sent_disconnect_pkt:
+            self._arq_intf.on_final_pkt_recv(packet)
+        else:
+            # if it returns packets, then the reception is completed
+            recvd_packets = self._arq_intf.on_packet_recv(packet)
+            if not recvd_packets:
+                return None, None
 
-    def _handle_recv_tp0(self, packet):
-        pass
+            # when type != 2, only one packet will be transmitted
+            if packet['type'] == 0:
+                return 'connect', packet['dest_af']
 
-    def _handle_recv_tp1(self, packet):
-        pass
+            elif packet['type'] == 1:
+                if packet['conn_status'] in (0, 1):
+                    return 'wait', None
+                elif packet['conn_status'] == 2:
+                    return 'write', None
+                elif packet['conn_status'] == 3:
+                    return 'disconnect', None
 
-    def _handle_recv_tp2(self, packet):
-        pass
+            elif packet['type'] == 2:
+                data = b''
+                for pkt in packets:
+                    data += pkt['data']
+                return 'transmit', data
 
-    def _handle_recv_tp3(self, packet):
-        pass
+            elif packet['type'] == 4:
+                pass
 
-    def _handle_recv_tp4(self, packet):
-        pass
+    def update_last_recv_time(self):
+        self._fb_last_recv_time = time.time()
+
+    def destroy(self):
+        # all we need to do is remove all the repeating items
+        del self._arq_intf
 
     @property
     def udp_fd(self):
         return self._udp_sock.fileno()
+
+    @property
+    def fb_last_recv_time(self):
+        self._fb_last_recv_time
 
 
 class ARQInterface():
@@ -456,12 +496,12 @@ class ARQInterface():
     We just need to make sure that every serial number has been received.
     '''
 
-    def __init__(self, tou_adapter, arq_repeater, udp_sock,
-                       tou_udp_svr_port, min_tu, max_tu, max_wd_size):
+    def __init__(self, max_wd_size, min_tu, max_tu, tou_adapter,
+                       arq_repeater, udp_sock, udp_dest_af):
         self._tou_adapter = tou_adapter
         self._arq_repeater = arq_repeater
         self._udp_sock = udp_sock
-        self._tou_udp_svr_af = ('127.0.0.1', tou_udp_svr_port)
+        self._udp_dest_af = udp_dest_af
 
         self._min_tu = min_tu
         self._max_tu = max_tu
@@ -476,63 +516,95 @@ class ARQInterface():
 
     def transmit_data_block(self, data_block):
         if self.__locked:
-            logging.warn('[TOU] Try to send data when ARQInterface locked')
+            logging.warn('[TOU] Trying send data when ARQInterface locked')
             return
         self.__locked = True
         self._window = Window(self._max_wd_size, self._min_tu, self._max_tu,
-                              self._arq_repeater, self._tou_adapter,
-                              data_block=data_block)
+                              self._tou_adapter, self._arq_repeater,
+                              self._udp_dest_af, data_block=data_block)
         self._window.transmit()
 
     def send_packet(self, packet, serial):
         if self.__locked:
-            logging.warn('[TOU] Try to send packet when ARQInterface locked')
+            logging.warn('[TOU] Trying send packet when ARQInterface locked')
             return
         self.__locked = True
         self._window = Window(self._max_wd_size, self._min_tu, self._max_tu,
-                              self._arq_repeater, self._tou_adapter,
-                              packet=packet, serial=serial)
+                              self._tou_adapter, self._arq_repeater,
+                              self._udp_dest_af, packet=packet, serial=serial)
         self._window.transmit()
 
     def send_ack(self, recvd_serial):
         packet = PacketMaker.make_tou_packet(type_=3, ack_type=0,
                                              recvd_serial=recvd_serial)
-        self.udp_sock.sendto(packet, self._tou_udp_svr_af)
+        self.udp_sock.sendto(packet, self._udp_dest_af)
 
     def send_una(self, recvd_serial):
         packet = PacketMaker.make_tou_packet(type_=3, ack_type=1,
                                              recvd_serial=recvd_serial)
-        self.udp_sock.sendto(packet, self._tou_udp_svr_af)
+        self.udp_sock.sendto(packet, self._udp_dest_af)
 
     def on_packet_recv(self, packet):
-        '''Handle ARQ here
-
-        :params: the parsed data packet. Type: dict
-        '''
-
         srl = packet['serial']
         type_ = packet['type']
 
         # type == 3: ACK/UNA
         # if we don't have a window instance here, then the ack must be invalid
         if type_ == 3 and self._window:
-            if self._window.received_correct_ack(srl):
+            ack_tp = packet['ack_type']
+            if (ack_tp == 0 and self._window.received_correct_ack(srl)) or\
+               (ack_tp == 1 and self._window.received_correct_una(srl)):
                 if self._window.completed:
                     self._window = None
                     self.__locked = False
         # type != 3 stream data or other information packet
-        else:
+        elif type_ != 3:
             if not self._receiver:
                 self._receiver = Receiver(packet['amount'],
-                                          self.last_recv_serial+1)
+                                          self._last_recv_serial+1)
 
-            if type_ == 3:
-                if self._receiver.received_correct_packet(packet):
-                    # send ACK/UNA
-                    pass
-            else:
-                if self._receiver.received_correct_packet(packet):
-                    self.send_ack(srl)
+            if self._receiver.received_correct_packet(packet):
+                # self.send_ack(srl)
+                if self._receiver.completed:
+                    self._last_recv_serial = self._receiver.last_serial
+                    self.send_una(self._last_recv_serial)
+                    packets = self._receiver.dump()
+                    self._receiver = None
+                    return data
+
+    def on_final_block_recv(self, packet):
+        # This packet is a part of the final data block which TOUAdapter sends.
+        # Once the other side received a ACK packet of this final block,
+        # it can know that udp socket can be closed safely.
+        if not self._receiver:
+            self._receiver = Receiver(packet['amount'],
+                                      self._last_recv_serial+1)
+
+        if self._receiver.received_correct_packet(packet):
+            # We have to make sure the other side has received the final ACK
+            # The way to ensure this is expect it stop sending the final block.
+            # So, the passive side cannot close UDP socket proactively.
+            self.send_ack(packet['serial'])
+            self._tou_adapter.update_last_recv_time()
+
+    def final_ack_recvd(self, packet):
+        type_ = packet['type']
+        srl = packet['serial']
+
+        if type_ == 3 and self._window:
+            ack_tp = packet['ack_type']
+            if ack_tp == 0 and self._window.received_correct_ack(srl):
+                return True
+        return False
+
+    def close(self):
+        if self._window:
+            self._window.close()
+        self._window = None
+        self._receiver = None
+
+    def __del__(self):
+        self.close()
 
     @property
     def max_db_size(self):
@@ -567,20 +639,12 @@ class Receiver():
             return True
         return False
 
-    # only for stream data
-    def dump_stream(self):
-        data = b''
-        data_map = {}
-        for srl in self._serials:
-            packet = self._buffer[srl]
-            db_srl = packet['data_serial']
-            db = packet['data']
-            data += db
-            data_map[db_srl] = db
-        return data, data_map
-
     def dump(self):
-        return self._buffer
+        return [self._buffer[srl] for srl in self._serials]
+
+    @property
+    def last_serial(self):
+        return self._serial[-1]
 
     @property
     def completed(self):
@@ -590,7 +654,7 @@ class Receiver():
 class Window():    # or sender, transmitter, whatever
 
     def __init__(self, max_wd_size, min_tu, max_tu, tou_adapter, arq_repeater,
-                       data_block=None, packet=None, serial=None):
+                       udp_dest_af, data_block=None, packet=None, serial=None):
         self._size = None
         self.__completed = False
         self._packets = {}
@@ -602,6 +666,7 @@ class Window():    # or sender, transmitter, whatever
         self._max_wd_size = max_wd_size
         self._tou_adapter = tou_adapter
         self._arq_repeater = arq_repeater
+        self._udp_dest_af = udp_dest_af
         self._rpt_interval = self._tou_adapter.rand_rpt_interval()
 
         # Actually, data_block and packet won't be passed in at the same time.
@@ -678,8 +743,8 @@ class Window():    # or sender, transmitter, whatever
 
     def transmit(self):
         for serial, packet in self._packets.items():
-            self._repeater.add_repetition(self._rpt_interval, serial,
-                                          packet, self._udp_sock)
+            self._repeater.add_repetition(self._rpt_interval, serial, packet,
+                                          self._udp_sock, self._udp_dest_af)
             self.unackd_serials.append(serial)
 
     def received_correct_ack(self, serial):
@@ -692,6 +757,23 @@ class Window():    # or sender, transmitter, whatever
             return True
         return False
 
+    def received_correct_una(self, serial):
+        if serial in self.unackd_serials:
+            node = self.unackd_serials.index(serial) + 1
+            ackd_serials = self.unackd_serials[:node]
+            self.unackd_serials = self.unackd_serials[node:]
+            for ackd_serial in ackd_serials:
+                self._repeater.rm_repetition(ackd_serial)
+
+            if not self.unackd_serials:
+                self.__completed = True
+            return True
+        return False
+
+    def close(self):
+        for srl in self.unackd_serials:
+            self._repeater.rm_repetition(srl)
+
     @property
     def completed(self):
         return self.__completed
@@ -699,11 +781,10 @@ class Window():    # or sender, transmitter, whatever
 
 class ARQRepeater(Thread):
 
-    def __init__(self, tou_udp_svr_port):
+    def __init__(self):
         Thread.__init__(self, daemon=True)
 
         self._running = False
-        self._dest_af = ('127.0.0.1', tou_udp_svr_port)
         self._evt = Event()
         self._schd = sched.scheduler()
         self.task_list = []
@@ -726,9 +807,9 @@ class ARQRepeater(Thread):
         task()
         self._activate()
 
-    def add_repetition(self, interval, serial, packet, sock):
+    def add_repetition(self, interval, serial, packet, sock, dest_af):
         def send():
-            sock.sendto(packet, self._dest_af)
+            sock.sendto(packet, dest_af)
 
         self._add_task(interval, send, serial)
 

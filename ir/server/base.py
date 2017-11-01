@@ -37,10 +37,10 @@ class ServerMixin(object):
         self._before_init()
         self._config = self._read_config(config_path)
         self._load_handler()
-        self._local_sock = self._init_socket()
-        self._local_sock_fd = self._local_sock.fileno()
+        self._server_sock = self._init_socket()
+        self._server_sock_fd = self._server_sock.fileno()
         self._epoll = select.epoll()
-        self._epoll.register(self._local_sock_fd, self._poll_mode)
+        self._epoll.register(self._server_sock_fd, self._poll_mode)
         self._after_init()
 
     def _before_init(self):
@@ -68,7 +68,8 @@ class ServerMixin(object):
         self._fd_2_handler[fd] = handler
 
     def _remove_handler(self, fd):
-        del self._fd_2_handler[fd]
+        if fd in self._fd_2_handler:
+            del self._fd_2_handler[fd]
 
     def _before_run(self):
         pass
@@ -134,9 +135,9 @@ class TCPServer(ServerMixin):
 
     def handle_event(self, fd, evt):
         handler = self._fd_2_handler.get(fd)
-        if fd == self._local_sock_fd and not handler:
+        if fd == self._server_sock_fd and not handler:
             try:
-                conn, src = self._local_sock.accept()
+                conn, src = self._server_sock.accept()
                 logging.info('[TCP] Accepted connection from %s:%d, fd: %d' %\
                                                         (*src, conn.fileno()))
                 self.TCPHandler(self, conn, src, self._epoll,
@@ -147,7 +148,6 @@ class TCPServer(ServerMixin):
                                 errno.EWOULDBLOCK):
                     return
         else:
-            handler = self._fd_2_handler.get(fd)
             if handler:
                 handler.handle_event(fd, evt)
             else:
@@ -292,14 +292,14 @@ class UDPServer(ServerMixin):
             logging.info('[IV_MNG] Updated cryptor for %s' % src_af[0])
 
     def _local_server_socket_recv(self):
-        data, anc, f, src = self._local_sock.recvmsg(UDP_BUFFER_SIZE,
+        data, anc, f, src = self._server_sock.recvmsg(UDP_BUFFER_SIZE,
                                                      socket.CMSG_SPACE(24))
         sock_opt = tools.unpack_sockopt(anc[0][2])
         dest = ('.'.join([str(u) for u in sock_opt[2:]]), sock_opt[1])
         return data, src, dest
 
     def _remote_server_socket_recv(self):
-        data, src = self._local_sock.recvfrom(UDP_BUFFER_SIZE)
+        data, src = self._server_sock.recvfrom(UDP_BUFFER_SIZE)
         cryptor = self._excl.current_cryptor
         res = PacketParser.parse_udp_packet(cryptor, data)
         if not res['valid']:
@@ -340,7 +340,7 @@ class UDPServer(ServerMixin):
             return self._remote_server_socket_recv()
 
     def handle_event(self, fd, evt):
-        if fd == self._local_sock_fd:
+        if fd == self._server_sock_fd:
             if evt & select.EPOLLERR:
                 logging.warn('[UDP] Server socket got EPOLLERR')
                 return
@@ -359,7 +359,7 @@ class UDPServer(ServerMixin):
                     handler = self._mkey_2_handler.get(mkey)
                     if not (handler and handler.update_last_call_time()):
                         handler = self.UDPHandler(src, dest, self,
-                                                  self._local_sock,
+                                                  self._server_sock,
                                                   self._epoll, self._config,
                                                   self._is_local, mkey=mkey)
                     if data:
@@ -371,7 +371,7 @@ class UDPServer(ServerMixin):
                     handler = self._key_2_handler.get(key)
                     if not (handler and handler.update_last_call_time()):
                         handler = self.UDPHandler(src, dest, self,
-                                                  self._local_sock,
+                                                  self._server_sock,
                                                   self._epoll, self._config,
                                                   self._is_local, key)
                         self._key_2_handler[key] = handler

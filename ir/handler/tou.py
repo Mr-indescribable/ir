@@ -5,6 +5,7 @@ from ir.handler.base import TCPHandler as BaseTCPHandler
 from ir.handler.base import UDPHandler as BaseUDPHandler
 from ir.protocol.tou import PacketMaker as TOUPacketMaker
 from ir.protocol.tou import PacketParser as TOUPacketParser
+from ir.protocol import TOUAdapter
 
 
 __all__ = ['TCPHandler', 'UDPHandler']
@@ -23,7 +24,8 @@ class TCPHandler(BaseTCPHandler):
     Then the UDP server will encrypt these data before transmit.
     '''
 
-    def __init__(self, server, epoll, config, is_local, src, local_sock=None):
+    def __init__(self, server, epoll, config, arq_repeater,
+                       is_local, src, local_sock=None):
         self._server = server
         self._local_sock = local_sock
         self._local_sock.setsockopt(socket.SOL_TCP, socket.TCP_NODELAY, 1)
@@ -36,27 +38,52 @@ class TCPHandler(BaseTCPHandler):
         self._data_2_remote_sock = []
         self._remote_sock = None
         self._fpacket_handled = False
+        self._waiting_for_destroy = False
+        self._tcp_destroyed = False
+        self._udp_destroyed = False
         self._destroyed = False
+
         if self._is_local:
             self._remote_ip = self._config.get('remote_addr')
-            self._remote_port = self._config.get('remote_tcp_port')
+            self._remote_tcp_port = self._config.get('tou_remote_tcp_port')
+            self._remote_udp_port = self._config.get('tou_remote_udp_port')
             self._remote_af = (self._remote_ip, self._remote_port)
             self._dest_af = None
+            events = select.EPOLLIN | select.EPOLLRDHUP | select.EPOLLERR
+            self._add_sock_to_poll(self._local_sock, events)
         else:
             self._remote_ip = None
             self._remote_port = None
             self._remote_af = None
-        events = select.EPOLLIN | select.EPOLLRDHUP | select.EPOLLERR
-        self._add_sock_to_poll(self._local_sock, events)
+
+        self._tou_adapter = TOUAdapter(arq_repeater, self._config,
+                                       self._is_local, src)
+        self._add_sock_to_poll(self._tou_adapter._udp_sock,
+                               select.EPOLLIN | select.EPOLLERR)
+
         if self._is_local:
             self._handle_fpacket()
             self._fpacket_handled = True
         self._local_sock_poll_mode = 'ro'
         self._remote_sock_poll_mode = 'ro'
 
-    def _handle_fpacket(self, data=b''):
+    def _handle_fpacket(self, packet=None):
         if self._is_local:
             self._dest_af = self._local_get_dest_af()
+            self._tou_adapter.connect(self._dest_af)
+        else:
+            cmd, parsed_pkt = self._tou_adapter.udp_in(packet)
+            if cmd != 'connect':
+                logging.warning('[TOU] Type of first packet is not 0')
+                self._tou_adapter.disconnect()
+                return
+            else:
+                dest_af = parsed_pkt['dest_af']
+                self._remote_sock = self._create_remote_sock(dest_af)
+                if not self._remote_sock:
+                    logging.warn(
+                          '[TCP] Cannot connect to %s:%d, do destroy' % dest_af)
+                    self._tou_adapter.disconnect()
 
     def _on_local_read(self):
         if self._destroyed:
@@ -73,8 +100,60 @@ class TCPHandler(BaseTCPHandler):
                                                  errno.EWOULDBLOCK):
                 return
         if not data:
-            logging.info('[TCP] Local socket got null data')
+            logging.info('[TCP] Got null data from local socket')
             return
+
+    def destroy_tcp_sock(self):
+        if self._tcp_destroyed:
+            logging.warn('[TOU] TCP socket already destroyed')
+            return
+
+        self._tcp_destroyed = True
+        self._waiting_for_destroy = True
+
+        if self._is_local:
+            loc_fd = self._local_sock.fileno()
+            self._server._remove_handler(loc_fd)
+            self._epoll.unregister(loc_fd)
+            self._local_sock.close()
+            self._local_sock = None
+            logging.debug('[TCP] Local socket destroyed, fd: %d' % loc_fd)
+        elif (not self._is_local and self._remote_sock):
+            rmt_fd = self._remote_sock.fileno()
+            self._server._remove_handler(rmt_fd)
+            self._epoll.unregister(rmt_fd)
+            self._remote_sock.close()
+            self._remote_sock = None
+            if self._is_local:
+                af = self._dest_af
+            else:
+                af = self._remote_af
+            logging.info('[TCP] Remote socket @ %s:%d destroyed, fd: %d' %\
+                                                              (*af, rmt_fd))
+
+    def destroy_udp_sock(self):
+        if self._udp_destroyed:
+            logging.warn('[TOU] UDP socket already destroyed')
+            return
+
+        self._udp_destroyed = True
+        udp_fd = self._tou_adapter._udp_sock.fileno()
+        if self._is_local:
+            self._server._remove_handler(udp_fd)
+        else:
+            self._server._remove_handler(udp_fd, self._src[1])
+        self._epoll.unregister(udp_fd)
+        self._tou_adapter.destroy()
+        self._tou_adapter = None
+        logging.debug('[TOU] UDP socket destroyed, fd: %d' % udp_fd)
+
+    @property
+    def fb_last_recv_time(self):
+        return self._tou_adapter.fb_last_recv_time
+
+    @property
+    def udp_socket_destroyed(self):
+        return self._udp_destroyed
 
 
 class UDPHandler(BaseUDPHandler):
