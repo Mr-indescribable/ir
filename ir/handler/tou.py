@@ -41,7 +41,6 @@ class TCPHandler(BaseTCPHandler):
         self._waiting_for_destroy = False
         self._tcp_destroyed = False
         self._udp_destroyed = False
-        self._destroyed = False
 
         if self._is_local:
             self._remote_ip = self._config.get('remote_addr')
@@ -76,6 +75,7 @@ class TCPHandler(BaseTCPHandler):
             if cmd != 'connect':
                 logging.warning('[TOU] Type of first packet is not 0')
                 self._tou_adapter.disconnect()
+                self.destroy_tcp_sock()
                 return
             else:
                 dest_af = parsed_pkt['dest_af']
@@ -84,6 +84,7 @@ class TCPHandler(BaseTCPHandler):
                     logging.warn(
                           '[TCP] Cannot connect to %s:%d, do destroy' % dest_af)
                     self._tou_adapter.disconnect()
+                    self.destroy_tcp_sock()
 
     def _on_local_read(self):
         if self._destroyed:
@@ -109,7 +110,6 @@ class TCPHandler(BaseTCPHandler):
             return
 
         self._tcp_destroyed = True
-        self._waiting_for_destroy = True
 
         if self._is_local:
             loc_fd = self._local_sock.fileno()
@@ -118,7 +118,7 @@ class TCPHandler(BaseTCPHandler):
             self._local_sock.close()
             self._local_sock = None
             logging.debug('[TCP] Local socket destroyed, fd: %d' % loc_fd)
-        elif (not self._is_local and self._remote_sock):
+        elif not self._is_local and self._remote_sock:
             rmt_fd = self._remote_sock.fileno()
             self._server._remove_handler(rmt_fd)
             self._epoll.unregister(rmt_fd)
@@ -132,6 +132,9 @@ class TCPHandler(BaseTCPHandler):
                                                               (*af, rmt_fd))
 
     def destroy_udp_sock(self):
+        if not self._tcp_destroyed:
+            self.destroy_tcp_sock()
+
         if self._udp_destroyed:
             logging.warn('[TOU] UDP socket already destroyed')
             return

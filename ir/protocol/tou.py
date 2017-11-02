@@ -1,6 +1,7 @@
 #!/usr/bin/python3.6
 #coding: utf-8
 
+import os
 import time
 import sched
 import select
@@ -346,8 +347,12 @@ class TOUAdapter():
         self._db_serial = -1
         self._stream_buffer = []
         self._fb_last_recv_time = None
-        self._sent_disconnect_pkt = False
-        self._disconnection_confirmed = False
+        self._fin_sent = False
+        self._fin_recvd = False
+        self._final_ack_expecting = False
+        # this flag means the transmission has been finished already
+        # the UDP socket now can be closed safely
+        self._transmission_finished = False
 
         self._arq_repeater = arq_repeater
         self._config = config
@@ -406,12 +411,12 @@ class TOUAdapter():
         self._arq_intf.send_packet(packet, serial)
 
     def disconnect(self):
-        if not self._sent_disconnect_pkt:
+        if not self._fin_sent:
             serial = self._next_serial()
             packet = PacketMaker.make_tou_packet(serial=serial, type_=1,
                                                  conn_status=3)
             self._arq_intf.send_packet(packet, serial)
-            self._sent_disconnect_pkt = True
+            self._fin_sent = True
 
     def __send(self, data=b''):
         if self._stream_buffer:
@@ -441,35 +446,66 @@ class TOUAdapter():
 
     def udp_in(self, packet):
         packet = PacketParser.parse_tou_packet(packet)
+        type_ = packet['type']
+        srl = packet['serial']
 
-        if self._sent_disconnect_pkt:
-            self._arq_intf.on_final_pkt_recv(packet)
-        else:
-            # if it returns packets, then the reception is completed
-            recvd_packets = self._arq_intf.on_packet_recv(packet)
-            if not recvd_packets:
+        if srl <= self._arq_intf._last_recvd_serial:
+            self._arq_intf.send_ack(srl)
+            return None, None
+
+        if (self._fin_sent and type_ == 3) and not self._final_ack_expecting:
+            # expecting ACK
+            self._arq_intf.on_packet_recv(packet)
+            if not self._arq_intf.locked:
+                self._final_ack_expecting = True
+                # send something to other side and let it know that we
+                # have received the ACK of the FIN
+                data = os.urandom(random.randint(0, 128))
+                self._arq_intf.transmit_data_block(data)
                 return None, None
+        elif self._final_ack_expecting and type_ == 3:
+            if self._arq_intf.final_ack_recvd(packet):
+                self._transmission_finished = True
+                self._arq_intf.close()
+                return 'destroy', None
+        elif self._fin_recvd:
+            # expecting the final block
+            if self._arq_intf.final_block_recvd(packet):
+                self._transmission_finished = True
+                return 'wait_for_destroy', None
+        else:
+            return self._normal_udp_in(packet)
 
-            # when type != 2, only one packet will be transmitted
-            if packet['type'] == 0:
-                return 'connect', packet['dest_af']
+    def _normal_udp_in(self, packet):
+        # if it returns packets, then the reception is completed
+        recvd_packets = self._arq_intf.on_packet_recv(packet)
+        if not recvd_packets:
+            return None, None
 
-            elif packet['type'] == 1:
-                if packet['conn_status'] in (0, 1):
-                    return 'wait', None
-                elif packet['conn_status'] == 2:
-                    return 'write', None
-                elif packet['conn_status'] == 3:
-                    return 'disconnect', None
+        type_ = packet['type']
 
-            elif packet['type'] == 2:
-                data = b''
-                for pkt in packets:
-                    data += pkt['data']
-                return 'transmit', data
-
-            elif packet['type'] == 4:
-                pass
+        # when type != 2, only one packet will be transmitted
+        if type_ == 0:
+            return 'connect', packet['dest_af']
+        elif type_ == 1:
+            conn_status = packet['conn_status']
+            if conn_status in (0, 1):
+                return 'wait', None
+            elif conn_status == 2:
+                return 'write', None
+            elif conn_status == 3:
+                # after this, the handler should close the TCP connection
+                self._fin_recvd = True
+                return 'disconnect', None
+        elif type_ == 2:
+            data = b''
+            for pkt in packets:
+                data += pkt['data']
+            return 'transmit', data
+        elif type_ == 4:
+            # type 4 is not currently in use
+            pass
+        return None, None
 
     def update_last_recv_time(self):
         self._fb_last_recv_time = time.time()
@@ -508,7 +544,7 @@ class ARQInterface():
         self._max_wd_size = max_wd_size    # max window size
         self._max_db_size = max_wd_size * max_tu    # max data block size
 
-        self._last_recv_serial = -1
+        self._last_recvd_serial = -1
         self._window = None
         self._receiver = None
         # a locked ARQInterface can only transmit ACK/UNA packets
@@ -561,24 +597,24 @@ class ARQInterface():
         elif type_ != 3:
             if not self._receiver:
                 self._receiver = Receiver(packet['amount'],
-                                          self._last_recv_serial+1)
+                                          self._last_recvd_serial+1)
 
             if self._receiver.received_correct_packet(packet):
-                # self.send_ack(srl)
+                self.send_ack(srl)
                 if self._receiver.completed:
-                    self._last_recv_serial = self._receiver.last_serial
-                    self.send_una(self._last_recv_serial)
+                    self._last_recvd_serial = self._receiver.last_serial
+                    # self.send_una(self._last_recvd_serial)
                     packets = self._receiver.dump()
                     self._receiver = None
                     return data
 
-    def on_final_block_recv(self, packet):
+    def final_block_recvd(self, packet):
         # This packet is a part of the final data block which TOUAdapter sends.
         # Once the other side received a ACK packet of this final block,
         # it can know that udp socket can be closed safely.
         if not self._receiver:
             self._receiver = Receiver(packet['amount'],
-                                      self._last_recv_serial+1)
+                                      self._last_recvd_serial+1)
 
         if self._receiver.received_correct_packet(packet):
             # We have to make sure the other side has received the final ACK
@@ -586,6 +622,8 @@ class ARQInterface():
             # So, the passive side cannot close UDP socket proactively.
             self.send_ack(packet['serial'])
             self._tou_adapter.update_last_recv_time()
+            return True
+        return False
 
     def final_ack_recvd(self, packet):
         type_ = packet['type']
