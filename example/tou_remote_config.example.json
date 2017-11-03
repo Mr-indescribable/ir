@@ -9,12 +9,22 @@
 	"udp_socket_max_idle_time": 60,
 	"log_level": "info",
 	"log_file": {"tcp": "/tmp/ir-tcp.log",
-				 "udp": "/tmp/ir-udp.log"},
+				 "udp": "/tmp/ir-udp.log",
+				 "tou_tcp": "/tmp/ir-tou-tcp.log",
+				 "tou_udp": "/tmp/ir-tou-udp.log"},
 	"crypto_libpath": "/usr/local/lib64/libcrypto.so.1.1",
 
 	"udp_multi_source": ["192.168.122.171", "192.168.122.23"],
 	"udp_multi_transmit_times": 1,
 	"udp_multi_transmit_max_packet_serial": 32768,
 	"udp_min_salt_len": 4,
-	"udp_max_salt_len": 32
+	"udp_max_salt_len": 32,
+
+	"tou_pkt_max_serial": 4294967295,
+	"tou_tcp_db_max_serial": 4294967295,
+	"tou_min_tu": 1024,
+	"tou_max_tu": 8192,
+	"tou_arq_rto": 0.2,
+	"tou_max_upstm_window_size": 32,
+	"tou_max_dnstm_window_size": 96
 }

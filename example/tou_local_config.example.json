@@ -1,7 +1,8 @@
 {
 	"remote_addr": "192.168.122.164",
 	"tou_remote_tcp_port": 6040,
-	"tou_remote_udp_port": 6060,
+	"tou_udp_multi_remote": {"192.168.122.164": 6060,
+							 "192.168.122.23": 6060},
 
 	"listen_addr": "127.0.0.1",
 	"listen_udp_port": 60050,
@@ -28,11 +29,11 @@
 	"udp_min_salt_len": 4,
 	"udp_max_salt_len": 32,
 
-	"tou_pkt_max_serial": 8192,
-	"tou_tcp_db_max_serial": 4096,
-	"tou_min_tu": 64,
-	"tou_max_tu": 4096,
+	"tou_pkt_max_serial": 4294967295,
+	"tou_tcp_db_max_serial": 4294967295,
+	"tou_min_tu": 1024,
+	"tou_max_tu": 8192,
 	"tou_arq_rto": 0.2,
 	"tou_max_upstm_window_size": 32,
-	"tou_max_dnstm_window_size": 128
+	"tou_max_dnstm_window_size": 96
 }

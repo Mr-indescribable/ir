@@ -99,7 +99,7 @@ class ServerMixin(object):
 class TCPServer(ServerMixin):
 
     _server_type = 'TCP'
-    _poll_mode = select.EPOLLIN | select.EPOLLRDHUP | select.EPOLLERR
+    _poll_mode = select.EPOLLIN | select.EPOLLRDHUP
 
     # store tcp connection handlers, {fd: handler}
     _fd_2_handler = {}
@@ -113,9 +113,9 @@ class TCPServer(ServerMixin):
         logging.info('[TCP] Initialized Cryptor with cipher: %s'\
                                     % self._config.get('cipher_name'))
 
-    def _init_socket(self, listen_addr=None, listen_port=None, so_backlog=1024):
-        listen_addr = listen_addr or self._config['listen_addr']
-        listen_port = listen_port or self._config['listen_tcp_port']
+    def _init_socket(self, so_backlog=1024):
+        listen_addr = self._config['listen_addr']
+        listen_port = self._config['listen_tcp_port']
         addr_info = socket.getaddrinfo(listen_addr, listen_port, 0,
                                        socket.SOCK_STREAM, socket.SOL_TCP)
         if len(addr_info) == 0:
@@ -157,7 +157,7 @@ class TCPServer(ServerMixin):
 class UDPServer(ServerMixin):
 
     _server_type = 'UDP'
-    _poll_mode = select.EPOLLIN | select.EPOLLERR
+    _poll_mode = select.EPOLLIN
 
     # store udp relay handlers, {fd: handler}
     _fd_2_handler = {}
@@ -182,9 +182,9 @@ class UDPServer(ServerMixin):
                 mkey in self._mkey_2_handler):
             del self._mkey_2_handler[mkey]
 
-    def _init_socket(self, listen_addr=None, listen_port=None):
-        listen_addr = listen_addr or self._config['listen_addr']
-        listen_port = listen_port or self._config['listen_udp_port']
+    def _init_socket(self):
+        listen_addr = self._config['listen_addr']
+        listen_port = self._config['listen_udp_port']
         addr_info = socket.getaddrinfo(listen_addr, listen_port, 0,
                                        socket.SOCK_DGRAM, socket.SOL_UDP)
         if len(addr_info) == 0:
@@ -230,7 +230,6 @@ class UDPServer(ServerMixin):
 
     def _gen_handler_key(self, src, dest):
         return '%s:%d@%s:%d' % (*src, *dest)
-        # return '%s:%d@%s:%d' % (source[0], source[1], dest[0], dest[1])
 
     def _gen_handler_mkey(self, src, dest):
         return '%d@%s:%d' % (src[1], *dest)

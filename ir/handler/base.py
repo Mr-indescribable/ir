@@ -40,8 +40,8 @@ class TCPHandler():
         self._epoll = epoll
         self._config = config
         self._is_local = is_local
-        self._data_2_local_sock = []
-        self._data_2_remote_sock = []
+        self._data_2_local = []
+        self._data_2_remote = []
         self._remote_sock = None
         self._fpacket_handled = False
         self._destroyed = False
@@ -77,8 +77,9 @@ class TCPHandler():
         return None
 
     def _add_sock_to_poll(self, sock, mode):
-        self._epoll.register(sock.fileno(), mode)
-        self._server._add_handler(sock.fileno(), self)
+        fd = sock.fileno()
+        self._epoll.register(fd, mode)
+        self._server._add_handler(fd, self)
 
     def _local_get_dest_af(self):
         opt = self._local_sock.getsockopt(socket.SOL_IP,
@@ -107,7 +108,7 @@ class TCPHandler():
         return remote_sock
 
     def _epoll_modify_2_ro(self, sock):
-        events = select.EPOLLIN | select.EPOLLRDHUP | select.EPOLLERR
+        events = select.EPOLLIN | select.EPOLLRDHUP
         self._epoll.modify(sock.fileno(), events)
         if sock == self._local_sock:
             self._local_sock_poll_mode = 'ro'
@@ -115,8 +116,7 @@ class TCPHandler():
             self._remote_sock_poll_mode = 'ro'
 
     def _epoll_modify_2_rw(self, sock):
-        events = select.EPOLLIN | select.EPOLLOUT |\
-                    select.EPOLLRDHUP | select.EPOLLERR
+        events = select.EPOLLIN | select.EPOLLOUT | select.EPOLLRDHUP
         self._epoll.modify(sock.fileno(), events)
         if sock == self._local_sock:
             self._local_sock_poll_mode = 'rw'
@@ -150,9 +150,9 @@ class TCPHandler():
                 return None
         if uncomplete:
             if sock == self._local_sock:
-                self._data_2_local_sock.append(data)
+                self._data_2_local.append(data)
             elif sock == self._remote_sock:
-                self._data_2_remote_sock.append(data)
+                self._data_2_remote.append(data)
         else:
             self._epoll_modify_2_ro(sock)
 
@@ -193,7 +193,7 @@ class TCPHandler():
                 return
             else:
                 data = self._cryptor.decrypt(data)
-        self._data_2_remote_sock.append(data)
+        self._data_2_remote.append(data)
         logging.debug(
                 '[TCP] %dB to %s:%d, stored' % (len(data), *self._remote_af))
         if self._remote_sock_poll_mode == 'ro':
@@ -211,9 +211,9 @@ class TCPHandler():
         if self._destroyed:
             return
 
-        if self._data_2_remote_sock:
-            data = b''.join(self._data_2_remote_sock)
-            self._data_2_remote_sock = []
+        if self._data_2_remote:
+            data = b''.join(self._data_2_remote)
+            self._data_2_remote = []
             self._write_to_sock(data, self._remote_sock)
             logging.debug(
                     '[TCP] Sent %dB to %s:%d' % (len(data), *self._remote_af))
@@ -249,7 +249,7 @@ class TCPHandler():
             data = self._cryptor.decrypt(data)
         else:
             data = self._cryptor.encrypt(data)
-        self._data_2_local_sock.append(data)
+        self._data_2_local.append(data)
         logging.debug('[TCP] %dB to %s:%d, stored' % (len(data), *self._src))
         if self._local_sock_poll_mode == 'ro':
             self._epoll_modify_2_rw(self._local_sock)
@@ -266,24 +266,24 @@ class TCPHandler():
         if self._destroyed:
             return
 
-        if self._data_2_local_sock:
-            data = b''.join(self._data_2_local_sock)
-            self._data_2_local_sock = []
+        if self._data_2_local:
+            data = b''.join(self._data_2_local)
+            self._data_2_local = []
             self._write_to_sock(data, self._local_sock)
             logging.debug(
                     '[TCP] Sent %dB to %s:%d' % (len(data), *self._src))
 
     def _on_local_disconnect(self):
-        if self._data_2_remote_sock:
+        if self._data_2_remote:
             self._on_remote_write()
-        if not self._data_2_remote_sock:
+        if not self._data_2_remote:
             logging.info('[TCP] Local socket got EPOLLRDHUP, do destroy()')
             self.destroy()
 
     def _on_remote_disconnect(self):
-        if self._data_2_local_sock:
+        if self._data_2_local:
             self._on_local_write()
-        if not self._data_2_local_sock:
+        if not self._data_2_local:
             logging.info('[TCP] Remote socket got EPOLLRDHUP, do destroy()')
             self.destroy()
 
@@ -321,13 +321,12 @@ class TCPHandler():
             self._cryptor = res['cryptor']
             self._iv = res['iv']
         if data:
-            events = select.EPOLLIN | select.EPOLLOUT |\
-                        select.EPOLLRDHUP | select.EPOLLERR
-            self._data_2_remote_sock.append(data)
+            events = select.EPOLLIN | select.EPOLLOUT | select.EPOLLRDHUP
+            self._data_2_remote.append(data)
             logging.debug('[TCP] %dB to %s:%d, stored' % (len(data),
                                                           *self._remote_af))
         else:
-            events = select.EPOLLIN | select.EPOLLRDHUP | select.EPOLLERR
+            events = select.EPOLLIN | select.EPOLLRDHUP
 
         if self._is_local:
             if not (self._remote_ip and self._remote_port):
@@ -358,7 +357,7 @@ class TCPHandler():
             return
         sock = self._fd_2_sock(fd)
         if not sock:
-            logging.warn('[TCP] Unknow socket error, do destroy()')
+            logging.warn('[TCP] Unknow socket error')
             return
 
         if sock == self._remote_sock:
@@ -412,9 +411,8 @@ class TCPHandler():
 
 class UDPHandler():
 
-    def __init__(self, src, dest, server, server_sock, epoll,
-                       config, is_local, key=None, mkey=None):
-        self.last_call_time = time.time()
+    def __init__(self, src, dest, server, server_sock, epoll, config,
+                       is_local, key=None, mkey=None, remote_af=None):
         self._src = src
         self._dest = dest
         self._server = server
@@ -424,23 +422,28 @@ class UDPHandler():
         self._is_local = is_local
         self._key = key
         self._mkey = mkey
+        self._remote_af = remote_af
+
+        self._before_init()
+        self.last_call_time = time.time()
         self._min_salt_len = config.get('udp_min_salt_len') or 4
         self._max_salt_len = config.get('udp_max_salt_len') or 32
-        if self._is_local:
-            remote_addr = config.get('remote_addr')
-            remote_port = config.get('remote_udp_port')
-            if not (remote_addr and remote_port):
-                logging.error('[UDP] Invalid remote udp server configuration')
-                import sys
-                sys.exit(1)
-            self._remote_af = (remote_addr, remote_port)
+
+        if self._is_local and not self._remote_af:
+            if not self._server._multi_transmit:
+                remote_addr = config.get('remote_addr')
+                remote_port = config.get('remote_udp_port')
+                if not (remote_addr and remote_port):
+                    logging.error('[UDP] Invalid remote udp configuration')
+                    import sys
+                    sys.exit(1)
+                self._remote_af = (remote_addr, remote_port)
 
         self._client_sock = self._create_client_sock()
         if not self._client_sock:
             self._destroyed = True
             return
-        self._add_sock_to_poll(self._client_sock,
-                               select.EPOLLIN | select.EPOLLERR)
+        self._add_sock_to_poll(self._client_sock, select.EPOLLIN)
         self._destroyed = False
         if self._is_local:
             self._return_sock = self._create_return_sock()
@@ -450,6 +453,14 @@ class UDPHandler():
         if self._server._multi_transmit and not self._is_local:
             self._src_addrs = [src[0]]
             self._src_port = src[1]
+
+        self._after_init()
+
+    def _before_init(self):
+        pass
+
+    def _after_init(self):
+        pass
 
     def _create_client_sock(self):
         client_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

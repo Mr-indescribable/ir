@@ -9,6 +9,7 @@ fi
 
 # your server's IP address
 REMOTE_ADDR=
+LOCAL_ADDR=
 
 ################################# TCP
 iptables -t nat -N IR_TCP
@@ -21,6 +22,7 @@ iptables -t nat -A IR_TCP -d 172.16.0.0/12 -j RETURN
 iptables -t nat -A IR_TCP -d 192.168.0.0/16 -j RETURN
 iptables -t nat -A IR_TCP -d 224.0.0.0/4 -j RETURN
 iptables -t nat -A IR_TCP -d 240.0.0.0/4 -j RETURN
+iptables -t nat -A IR_TCP -d ${LOCAL_ADDR}/32 -j RETURN
 iptables -t nat -A IR_TCP -d ${REMOTE_ADDR}/32 -j RETURN
 iptables -t nat -A IR_TCP -p tcp -j REDIRECT --to-ports 60040
 iptables -t nat -A OUTPUT -p tcp -j IR_TCP
@@ -41,6 +43,7 @@ iptables -t mangle -A IR_UDP_MARK -d 172.16.0.0/12 -j RETURN
 iptables -t mangle -A IR_UDP_MARK -d 192.168.0.0/16 -j RETURN
 iptables -t mangle -A IR_UDP_MARK -d 224.0.0.0/4 -j RETURN
 iptables -t mangle -A IR_UDP_MARK -d 240.0.0.0/4 -j RETURN
+iptables -t mangle -A IR_UDP_MARK -d ${LOCAL_ADDR}/32 -j RETURN
 iptables -t mangle -A IR_UDP_MARK -d ${REMOTE_ADDR}/32 -j RETURN
 
 iptables -t mangle -A IR_UDP -d 0.0.0.0/8 -j RETURN
@@ -51,6 +54,7 @@ iptables -t mangle -A IR_UDP -d 172.16.0.0/12 -j RETURN
 iptables -t mangle -A IR_UDP -d 192.168.0.0/16 -j RETURN
 iptables -t mangle -A IR_UDP -d 224.0.0.0/4 -j RETURN
 iptables -t mangle -A IR_UDP -d 240.0.0.0/4 -j RETURN
+iptables -t mangle -A IR_UDP -d ${LOCAL_ADDR}/32 -j RETURN
 iptables -t mangle -A IR_UDP -d ${REMOTE_ADDR}/32 -j RETURN
 iptables -t mangle -A IR_UDP -s ${REMOTE_ADDR}/32 -j RETURN
 
