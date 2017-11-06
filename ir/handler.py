@@ -426,7 +426,7 @@ class UDPHandler():
         self._mkey = mkey
         self._min_salt_len = config.get('udp_min_salt_len') or 4
         self._max_salt_len = config.get('udp_max_salt_len') or 32
-        if self._is_local:
+        if self._is_local and not self._server._multi_transmit:
             server_addr = config.get('server_addr')
             server_port = config.get('server_udp_port')
             if not (server_addr and server_port):
