@@ -342,6 +342,7 @@ class Buffer():
             self._buffer = ['----------', '=========', '=========', '--------']
             self._marker = [    'DB'    ,    'PKT'   ,    'PKT'   ,    'DB'   ]
         '''
+
         self._buffer = []
         self._marker = []
         self._tou_adapter = tou_adapter
@@ -358,7 +359,7 @@ class Buffer():
     def buff_packet(self, packet):
         '''store a packet
 
-        We don't made a real tou packet, it will be made when adapter going
+        We didn't make a real tou packet yet, it will be made when adapter going
         to send it. Here, we store a dict that contains the parameters we need
 
         :param packet: parameter container of a packet, type: dict
@@ -566,8 +567,9 @@ class TOUAdapter():
             self.send_buffered()
 
     def tcp_in(self, data):
-        self._buffer.buff_db(data)
-        logging.debug('[TOU] Adapter buffered %dB of stream data' % len(data))
+        if data:
+            self._buffer.buff_db(data)
+            logging.debug('[TOU] Adapter buffered %dB of data' % len(data))
 
     def _send_fb(self):
         if not self._final_block_sent:
@@ -575,7 +577,7 @@ class TOUAdapter():
             self._final_ack_expecting = True
             # send something to other side and let it know that
             # this side has received the ACK of the FIN
-            db = os.urandom(random.randint(0, 128))
+            db = os.urandom(random.randint(4, 128))
             self._buffer.buff_db(db)
             logging.debug('[TOU-UDP] FB sent')
 
@@ -902,6 +904,7 @@ class Window():    # or sender, transmitter, whatever
         self._udp_sock = udp_sock
         self._udp_dest_af = udp_dest_af
         self._rpt_interval = self._tou_adapter.rand_rpt_interval()
+        self._adapter_id = id(self._tou_adapter)
 
         # Actually, data_block and packet won't be passed in at the same time.
         # This serial is belong to the packet.
@@ -978,14 +981,15 @@ class Window():    # or sender, transmitter, whatever
     def transmit(self):
         for srl, packet in self._packets.items():
             self._arq_repeater.add_repetition(self._rpt_interval, srl, packet,
-                                              self._udp_sock, self._udp_dest_af)
+                                              self._udp_sock, self._udp_dest_af,
+                                              self._adapter_id)
             self.unackd_serials.append(srl)
 
     def received_correct_ack(self, serial):
         logging.debug('[TOU] ACK received, serial: %d' % serial)
         if serial in self.unackd_serials:
             self.unackd_serials.remove(serial)
-            self._arq_repeater.rm_repetition(serial)
+            self._arq_repeater.rm_repetition(serial, self._adapter_id)
 
             if not self.unackd_serials:
                 self.__completed = True
@@ -999,7 +1003,7 @@ class Window():    # or sender, transmitter, whatever
             ackd_serials = self.unackd_serials[:node]
             self.unackd_serials = self.unackd_serials[node:]
             for ackd_serial in ackd_serials:
-                self._arq_repeater.rm_repetition(ackd_serial)
+                self._arq_repeater.rm_repetition(ackd_serial, self._adapter_id)
 
             if not self.unackd_serials:
                 self.__completed = True
@@ -1008,7 +1012,7 @@ class Window():    # or sender, transmitter, whatever
 
     def close(self):
         for srl in self.unackd_serials:
-            self._arq_repeater.rm_repetition(srl)
+            self._arq_repeater.rm_repetition(srl, self._adapter_id)
 
     @property
     def completed(self):
@@ -1024,35 +1028,45 @@ class ARQRepeater(Thread):
         self._evt = Event()
         self._schd = sched.scheduler()
         self.task_list = []
-        self.task_map = {}    # {tou_packet_serial: task}
+        self.task_map = {}    # {"adapter_id-pkt_serial": task}
 
     def _activate(self):
         if not self._running:
             self._evt.set()
 
-    def _add_task(self, interval, func, serial):
+    def _gen_task_key(self, adapter_id, serial):
+        return '%d-%d' % (adapter_id, serial)
+
+    def _add_task(self, interval, func, serial, adapter_id):
         def repeat():
             if id(func) in self.task_list:
                 func()
                 self._schd.enter(interval, 1, repeat)
 
         self.task_list.append(id(func))
-        self.task_map[serial] = func
+        task_key = self._gen_task_key(adapter_id, serial)
+        self.task_map[task_key] = func
         repeat()
         self._activate()
 
-    def add_repetition(self, interval, serial, packet, sock, dest_af):
+    def add_repetition(self, interval, serial, packet,
+                             sock, dest_af, adapter_id):
         def send():
-            sock.sendto(packet, dest_af)
+            try:
+                sock.sendto(packet, dest_af)
+            except OSError:
+                logging.warn('[TOU-UDP] Socket closed, remove repetition')
+                self.rm_repetition(serial, adapter_id)
 
-        self._add_task(interval, send, serial)
+        self._add_task(interval, send, serial, adapter_id)
 
-    def rm_repetition(self, serial):
-        task = self.task_map.get(serial)
+    def rm_repetition(self, serial, adapter_id):
+        task_key = self._gen_task_key(adapter_id, serial)
+        task = self.task_map.get(task_key)
         tid = id(task)
         if tid in self.task_list:
             self.task_list.remove(tid)
-            del(self.task_map[serial])
+            del(self.task_map[task_key])
 
     def run(self):
         while True:

@@ -180,8 +180,7 @@ class TCPHandler():
                 return
         if not data:
             logging.info('[TCP] Got null data from local socket')
-            if not self._is_local:
-                self.destroy()
+            self.destroy()
             return
 
         if self._is_local:
@@ -243,6 +242,7 @@ class TCPHandler():
                 return
         if not data:
             logging.info('[TCP] Got null data from remote socket')
+            self.destroy()
             return
 
         if self._is_local:

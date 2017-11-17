@@ -138,8 +138,11 @@ class TCPHandler(BaseTCPHandler):
     # remote only
     def _on_remote_connected(self):
         self._remote_connected = True
-        self._epoll_modify_2_ro(self._remote_sock)
-        self._tou_adapter.feedback_conn_completed()
+        try:
+            self._epoll_modify_2_ro(self._remote_sock)
+            self._tou_adapter.feedback_conn_completed()
+        except AttributeError:
+            logging.warn('[TOU] TCPHandler._on_remote_connected interrupted')
 
     # local only
     def _on_local_disconnect(self):
@@ -165,27 +168,37 @@ class TCPHandler(BaseTCPHandler):
         logging.warn('[TCP] Remote socket got EPOLLERR, do destroy()')
         self.destroy_tcp_sock()
 
-    def _on_udp_in(self, data=None):
+    def _on_udp_in(self, data=None, evt=None):
         if self._udp_destroyed:
             return
 
         cmd, param = self._tou_adapter.on_udp_in(data)
 
-        if cmd == 'connect' and not self._fpacket_handled:
+        if cmd == 'connect':
             # Then command "connect" only appears at the remote side
             # when the local side requests a connection
-            self._remote_af = param
-            self._remote_sock = self._create_remote_sock(self._remote_af)
-            evts = select.EPOLLIN | select.EPOLLOUT | select.EPOLLRDHUP
-            self._add_sock_to_poll(self._remote_sock, evts)
-            self._fpacket_handled = True
+            if not self._remote_connected:
+                self._remote_af = param
+                self._remote_sock = self._create_remote_sock(self._remote_af)
+                evts = select.EPOLLIN | select.EPOLLOUT | select.EPOLLRDHUP
+                self._add_sock_to_poll(self._remote_sock, evts)
+                self._fpacket_handled = True
+            else:
+                # If this handler already connected to the destination server
+                # and we receive a connection request again, then we can know
+                # that local side has closed the connection already.
+                # For some unexpected reason, we didn't close the UDP connection
+                # correctly, so we need to send back these parameters to the
+                # server, destroy this handler and create a new one instead.
+                self._server.remote_reset_handler(self, evt, data, self._src)
         elif cmd == 'connected':
             # The command "connected" only appears at local side when the
             # remote side connected to destination server.
             self._remote_connected = True
-            data = b''.join(self._data_2_remote)
-            self._data_2_remote = []
-            self._tou_adapter.tcp_in(data)
+            if self._data_2_remote:
+                data = b''.join(self._data_2_remote)
+                self._data_2_remote = []
+                self._tou_adapter.tcp_in(data)
         elif cmd == 'disconnect':
             if not self._tcp_destroyed:
                 self.destroy_tcp_sock()
@@ -243,7 +256,7 @@ class TCPHandler(BaseTCPHandler):
             if evt & select.EPOLLERR:
                 self._on_udp_error()
             if evt & (select.EPOLLIN):
-                self._on_udp_in(data)
+                self._on_udp_in(data, evt)
         else:
             if self._tcp_destroyed:
                 logging.info('[TOU-TCP] TCPHandler destroyed')
@@ -310,26 +323,29 @@ class TCPHandler(BaseTCPHandler):
             return
 
         self._udp_destroyed = True
-        udp_fd = self._tou_adapter.udp_fd
-        if self._is_local:
-            self._server._remove_handler(udp_fd)
-            self._epoll.unregister(udp_fd)
-        else:
-            self._server._remove_handler(src_port=self._src[1])
-        self._tou_adapter.destroy()
-        self._tou_adapter = None
 
         if self._is_local:
+            udp_fd = self._tou_adapter.udp_fd
+            self._server._remove_handler(udp_fd)
+            self._epoll.unregister(udp_fd)
             logging.debug('[TOU-UDP] Adapter destroyed, fd: %d' % udp_fd)
         else:
-            logging.debug('[TOU-UDP] Adapter destroyed')
+            sp = self._src[1]
+            self._server._remove_handler(src_port=sp)
+            logging.debug('[TOU-UDP] Adapter destroyed, sp: %d' % sp)
+        self._tou_adapter.destroy()
+        self._tou_adapter = None
 
     @property
     def fb_last_recv_time(self):
         return self._tou_adapter.fb_last_recv_time
 
     @property
-    def udp_socket_destroyed(self):
+    def tcp_destroyed(self):
+        return self._tcp_destroyed
+
+    @property
+    def udp_destroyed(self):
         return self._udp_destroyed
 
 

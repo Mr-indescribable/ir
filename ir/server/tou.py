@@ -121,10 +121,7 @@ class TCPServer(BaseTCPServer):
             src_port = src[1]
             handler = self._udp_src_port_2_handler.get(src_port)
             if not handler:
-                handler = self.TCPHandler(self, self._epoll, self._config,
-                                          self._arq_repeater, self._is_local,
-                                          src, None)
-                self._udp_src_port_2_handler[src_port] = handler
+                handler = self._remote_new_handler(src)
             handler.handle_event(fd, evt, data)
         else:   # TCP event
             handler = self._fd_2_handler.get(fd)
@@ -132,6 +129,22 @@ class TCPServer(BaseTCPServer):
                 handler.handle_event(fd, evt)
             else:
                 logging.warn('[TCP] fd removed')
+
+    def _remote_new_handler(self, src):
+        handler = self.TCPHandler(self, self._epoll, self._config,
+                                  self._arq_repeater, self._is_local, src, None)
+        self._udp_src_port_2_handler[src[1]] = handler
+        return handler
+
+    def remote_reset_handler(self, handler, evt, data, src):
+        if not handler.tcp_destroyed:
+            handler.destroy_tcp_sock()
+        if not handler.udp_destroyed:
+            handler.destroy_tou_adapter()
+
+        handler = self._remote_new_handler(src)
+        handler.handle_event(self._server_sock_fd, evt, data)
+        logging.warn('[TOU] Reseted TCPHandler.')
 
     def handle_event(self, fd, evt):
         if self._is_local:
@@ -165,7 +178,7 @@ class TOUUDPSocketCleaner(Thread):
             for fd, handler in zip(fds, handlers):
                 if handler._waiting_for_destroy:
                     if now - handler.fb_last_recv_time > self.max_idle_time:
-                        if handler.udp_socket_destroyed:
+                        if handler.udp_destroyed:
                             self._server._remove_handler(fd)
                         else:
                             handler.destroy_tou_adapter()
@@ -175,7 +188,7 @@ class TOUUDPSocketCleaner(Thread):
             for src_port, handler in zip(src_ports, handlers):
                 if handler._waiting_for_destroy:
                     if now - handler.fb_last_recv_time > self.max_idle_time:
-                        if handler.udp_socket_destroyed:
+                        if handler.udp_destroyed:
                             self._server._remove_handler(src_port=src_port)
                         else:
                             handler.destroy_tou_adapter()
