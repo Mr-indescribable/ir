@@ -22,9 +22,9 @@
 
 	"udp_multi_remote": {"192.168.122.164": 6050,
 						 "192.168.122.23": 6050},
+
 	"udp_multi_transmit_times": 1,
 	"udp_multi_transmit_max_packet_serial": 32768,
-
 	"udp_iv_change_rate": 0.001,
 	"udp_min_salt_len": 4,
 	"udp_max_salt_len": 32,

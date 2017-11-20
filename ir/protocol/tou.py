@@ -56,11 +56,12 @@ Description:
     The adapter also needs to handle the information of TCP connection and
     provide a TCP-like ARQ function.
 
-    The adapter packs all data that we need to transmit. Then, the UDPServer
-    transmits the data over IR's UDP protocol.
+    The adapter will pack/unpack all these data that we need to transmit and
+    send it to the UDPServer. Then, the UDPServer will transmit all these
+    data over IR's UDP protocol.
 
 
-Data Packet Format:
+TOU Packet Format:
     +--------------------+-----------------------+
     |       field        |        byte(s)        |
     +--------------------+-----------------------+

@@ -186,8 +186,8 @@ class TOUUDPSocketCleaner(Thread):
                         else:
                             handler.destroy_tou_adapter()
         else:
-            src_ports = (self._server._udp_src_port_2_handler.keys())
-            handlers = (self._server._udp_src_port_2_handler.values())
+            src_ports = list(self._server._udp_src_port_2_handler.keys())
+            handlers = list(self._server._udp_src_port_2_handler.values())
             for src_port, handler in zip(src_ports, handlers):
                 if handler._waiting_for_destroy:
                     if now - handler.fb_last_recv_time > self.max_idle_time:
