@@ -17,6 +17,22 @@ from ir.protocol.base import AfConverter
 __all__ = ['PacketMaker', 'PacketParser']
 
 
+UDP_BUFFER_SIZE = 65536
+
+PKT_TYPE_0_CONN_INFO = 0
+PKT_TYPE_1_CONN_STAT_REPORT = 1
+PKT_TYPE_2_STREAM_DATA = 2
+PKT_TYPE_3_ACK = 3
+PKT_TYPE_4_REQUEST_PKT = 4
+
+ACK = 0
+UNA = 1
+
+CONN_STATUS_0_NO_CONN = 0
+CONN_STATUS_1_CONNECTING = 1
+CONN_STATUS_2_CONNECTED = 2
+CONN_STATUS_3_DISCONNECTED = 3
+
 
 '''IR TCP Over UDP
 
@@ -212,9 +228,6 @@ Field Description:
 '''
 
 
-UDP_BUFFER_SIZE = 65536
-
-
 class PacketMaker():
 
     @classmethod
@@ -239,18 +252,18 @@ class PacketMaker():
         :rtype: bytes
         '''
 
-        if type_ == 0:
+        if type_ == PKT_TYPE_0_CONN_INFO:
             body = AfConverter.ipv4_af_2_bytes(dest_af)
-        elif type_ == 1:
+        elif type_ == PKT_TYPE_1_CONN_STAT_REPORT:
             body = struct.pack('B', conn_status)
-        elif type_ == 2:
+        elif type_ == PKT_TYPE_2_STREAM_DATA:
             data_serial = struct.pack('I', data_serial)
             body = data_serial + data
-        elif type_ == 3:
+        elif type_ == PKT_TYPE_3_ACK:
             ack_type = struct.pack('B', ack_type)
             recvd_serial = struct.pack('I', recvd_serial)
             body = ack_type + recvd_serial
-        elif type_ == 4:
+        elif type_ == PKT_TYPE_4_REQUEST_PKT:
             body = struct.pack('I', lost_serial)
 
         serial = struct.pack('I', serial)
@@ -319,17 +332,17 @@ class PacketParser():
 
         body = raw_data[i: i + body_len]
 
-        if type_ == 0:
+        if type_ == PKT_TYPE_0_CONN_INFO:
             res['dest_af'] = AfConverter.bytes_2_ipv4_af(body)
-        elif type_ == 1:
+        elif type_ == PKT_TYPE_1_CONN_STAT_REPORT:
             res['conn_status'] = struct.unpack('B', body)[0]
-        elif type_ == 2:
+        elif type_ == PKT_TYPE_2_STREAM_DATA:
             res['data_serial'] = struct.unpack('I', body[:4])[0]
             res['data'] = body[4:]
-        elif type_ == 3:
+        elif type_ == PKT_TYPE_3_ACK:
             res['ack_type'] = struct.unpack('B', body[:1])[0]
             res['recvd_serial'] = struct.unpack('I', body[1:])[0]
-        elif type_ == 4:
+        elif type_ == PKT_TYPE_4_REQUEST_PKT:
             res['lost_serial'] = struct.unpack('I', body)[0]
         return res
 
@@ -514,12 +527,14 @@ class TOUAdapter():
         logging.warn('[TOU-UDP] UDP socket rebuilt')
 
     def connect(self, dest_af):
-        packet_params = {'type_': 0, 'dest_af': dest_af}
+        packet_params = {'type_': PKT_TYPE_0_CONN_INFO,
+                         'dest_af': dest_af}
         self._buffer.buff_packet(packet_params)
 
     # tell the local side: connection ready at the remote side
     def feedback_conn_completed(self):
-        packet_params = {'type_': 1, 'conn_status': 2}
+        packet_params = {'type_': PKT_TYPE_1_CONN_STAT_REPORT,
+                         'conn_status': CONN_STATUS_2_CONNECTED}
         self._buffer.buff_packet(packet_params)
 
     def send_fin(self):
@@ -530,8 +545,12 @@ class TOUAdapter():
         if not self._fin_sent and not self._arq_intf.locked:
             time_ = time.time()
             serial = self._next_serial()
-            packet = PacketMaker.make_tou_packet(serial=serial, type_=1,
-                                                 conn_status=3, time_=time_)
+            packet = PacketMaker.make_tou_packet(
+                                         serial=serial,
+                                         type_=PKT_TYPE_1_CONN_STAT_REPORT,
+                                         conn_status=CONN_STATUS_3_DISCONNECTED,
+                                         time_=time_,
+                                         )
             self._arq_intf.send_packet(packet, serial)
             self._fin_sent = True
             self._fin_wait_1 = True
@@ -588,11 +607,11 @@ class TOUAdapter():
         type_ = packet['type']
         srl = packet['serial']
 
-        if srl <= self._arq_intf._last_recvd_serial and type_ != 3:
+        if srl <= self._arq_intf._last_recvd_serial and type_ != PKT_TYPE_3_ACK:
             self._arq_intf.send_ack(srl)
             return None, None
 
-        if type_ == 3 and self._fin_wait_1:
+        if type_ == PKT_TYPE_3_ACK and self._fin_wait_1:
             self._arq_intf.on_packet_recv(packet)
             if not self._arq_intf.locked:
                 self._fin_wait_1 = False
@@ -608,7 +627,7 @@ class TOUAdapter():
                 self.update_last_recv_time()
                 logging.debug('[TOU-UDP] FB received')
                 return 'wait_for_destroy', None
-        if type_ == 3 and self._final_ack_expecting:
+        if type_ == PKT_TYPE_3_ACK and self._final_ack_expecting:
             if self._arq_intf.final_ack_recvd(packet):
                 self._transmission_finished = True
                 self._arq_intf.close()
@@ -624,15 +643,15 @@ class TOUAdapter():
         type_ = packet['type']
 
         # when type != 2, only one packet will be transmitted
-        if type_ == 0:
+        if type_ == PKT_TYPE_0_CONN_INFO:
             return 'connect', packet['dest_af']
-        elif type_ == 1:
+        elif type_ == PKT_TYPE_1_CONN_STAT_REPORT:
             conn_status = packet['conn_status']
-            if conn_status in (0, 1):
+            if conn_status in (CONN_STATUS_0_NO_CONN, CONN_STATUS_1_CONNECTING):
                 return 'wait', None
-            elif conn_status == 2:
+            elif conn_status == CONN_STATUS_2_CONNECTED:
                 return 'connected', None
-            elif conn_status == 3:
+            elif conn_status == CONN_STATUS_3_DISCONNECTED:
                 if self._fin_sent:
                     time_ = packet['time']
                     if self._disconnect_time > time_:
@@ -654,12 +673,12 @@ class TOUAdapter():
                 self._fin_recvd = True
                 logging.debug('[TOU-UDP] FIN received')
                 return 'disconnect', None
-        elif type_ == 2 and not self._tcp_destroyed:
+        elif type_ == PKT_TYPE_2_STREAM_DATA and not self._tcp_destroyed:
             data = b''
             for pkt in recvd_packets:
                 data += pkt['data']
             return 'transmit', data
-        elif type_ == 4:
+        elif type_ == PKT_TYPE_4_REQUEST_PKT:
             # type 4 is not currently in use
             pass
         return None, None
@@ -747,13 +766,15 @@ class ARQInterface():
         return True
 
     def send_ack(self, recvd_serial):
-        packet = PacketMaker.make_tou_packet(type_=3, ack_type=0,
+        packet = PacketMaker.make_tou_packet(type_=PKT_TYPE_3_ACK,
+                                             ack_type=ACK,
                                              recvd_serial=recvd_serial)
         self._udp_sock.sendto(packet, self._udp_dest_af)
         logging.debug('[TOU-UDP] ACK sent, serial: %d' % recvd_serial)
 
     def send_una(self, recvd_serial):
-        packet = PacketMaker.make_tou_packet(type_=3, ack_type=1,
+        packet = PacketMaker.make_tou_packet(type_=PKT_TYPE_3_ACK,
+                                             ack_type=UNA,
                                              recvd_serial=recvd_serial)
         self._udp_sock.sendto(packet, self._udp_dest_af)
         logging.debug('[TOU-UDP] UNA sent, serial: %d' % recvd_serial)
@@ -763,19 +784,18 @@ class ARQInterface():
         r_srl = packet['recvd_serial']
         type_ = packet['type']
 
-        # type == 3: ACK/UNA
         # if we don't have a window instance here, then the ack must be invalid
-        if type_ == 3 and self._window:
+        if type_ == PKT_TYPE_3_ACK and self._window:
             ack_tp = packet['ack_type']
-            if (ack_tp == 0 and self._window.received_correct_ack(r_srl)) or\
-               (ack_tp == 1 and self._window.received_correct_una(r_srl)):
+            if (ack_tp == ACK and self._window.received_correct_ack(r_srl)) or\
+               (ack_tp == UNA and self._window.received_correct_una(r_srl)):
                 if self._window.completed:
                     self._window = None
                     self.__locked = False
                     logging.debug('[TOU] Data block transmission completed')
                     self._tou_adapter.arq_intf_transmission_callback()
         # type != 3 stream data or other information packet
-        elif type_ != 3:
+        elif type_ != PKT_TYPE_3_ACK:
             if not self._receiver:
                 self._receiver = Receiver(packet['amount'],
                                           self._last_recvd_serial+1)
@@ -812,9 +832,9 @@ class ARQInterface():
         type_ = packet['type']
         recvd_srl = packet['recvd_serial']
 
-        if type_ == 3 and self._window:
+        if type_ == PKT_TYPE_3_ACK and self._window:
             ack_tp = packet['ack_type']
-            if ack_tp == 0 and self._window.received_correct_ack(recvd_srl):
+            if ack_tp == ACK and self._window.received_correct_ack(recvd_srl):
                 return True
         return False
 
@@ -920,22 +940,22 @@ class Window():    # or sender, transmitter, whatever
         self._size = len(self._packets)
 
     def _block_2_packets(self, block):
-        ''' 数据切割方法
+        # ''' 数据切割方法
 
-        当取得的数据块的大小满足以下条件时，直接使用max_tu作为切块大小：
-            (max_tu - 1) * 最大块数 < 总长度
+        # 当取得的数据块的大小满足以下条件时，直接使用max_tu作为切块大小：
+            # (max_tu - 1) * 最大块数 < 总长度
 
-        当数据块大小未达到上限时：
-            用x表示实际可用的最小块大小
-            x的计算方式：x = 数据块总长度 / 最大块数
+        # 当数据块大小未达到上限时：
+            # 用x表示实际可用的最小块大小
+            # x的计算方式：x = 数据块总长度 / 最大块数
 
-            此时有2种情况：
-                min_tu < x < max_tu:
-                    在x到max_tu之间取随机值作为实际切块大小
+            # 此时有2种情况：
+                # min_tu < x < max_tu:
+                    # 在x到max_tu之间取随机值作为实际切块大小
 
-                x < min_tu < max_tu:
-                    在min_tu到max_tu之间取随机值作为实际切块大小
-        '''
+                # x < min_tu < max_tu:
+                    # 在min_tu到max_tu之间取随机值作为实际切块大小
+        # '''
 
         db_len = len(block)
         if (self._max_tu - 1) * self._max_wd_size < db_len:
@@ -961,7 +981,7 @@ class Window():    # or sender, transmitter, whatever
             db_serial = self._tou_adapter._next_db_serial()
             packet = PacketMaker.make_tou_packet(serial=serial,
                                                  amount=amount,
-                                                 type_=2,
+                                                 type_=PKT_TYPE_2_STREAM_DATA,
                                                  data_serial=db_serial,
                                                  data=small_blk)
             packets[serial] = packet
