@@ -66,7 +66,7 @@ class TCPServer(BaseTCPServer):
         self._arq_repeater.start()
         self._tou_udp_socket_cleaner = TOUUDPSocketCleaner(self)
         self._tou_udp_socket_cleaner.start()
-        logging.info('[TOU] Running TCP server under TCP over UDP mode')
+        logging.info('[TOU-TCP] Running TCP server under TCP over UDP mode')
 
     def _init_socket(self, so_backlog=1024):
         listen_addr = '127.0.0.1'
@@ -89,8 +89,8 @@ class TCPServer(BaseTCPServer):
             sock.bind((listen_addr, listen_port))
 
         logging.info(
-                '[TOU] TCP Server is listening at %s:%d' % (listen_addr,
-                                                            listen_port)
+                '[TOU-TCP] TCP Server is listening at %s:%d' % (listen_addr,
+                                                                listen_port)
                 )
         return sock
 
@@ -99,8 +99,11 @@ class TCPServer(BaseTCPServer):
         if fd == self._server_sock_fd and not handler:
             try:
                 local_sock, src = self._server_sock.accept()
-                logging.info('[TCP] Accepted connection from %s:%d, fd: %d' %\
-                                                    (*src, local_sock.fileno()))
+                c_fd = local_sock.fileno()
+                logging.info(
+                    '[TOU-TCP] Accepted connection from %s:%d, fd: %d' % (*src,
+                                                                          c_fd)
+                    )
                 self.TCPHandler(self, self._epoll, self._config,
                                 self._arq_repeater, self._is_local,
                                 src, local_sock)
@@ -113,7 +116,7 @@ class TCPServer(BaseTCPServer):
             if handler:
                 handler.handle_event(fd, evt)
             else:
-                logging.warn('[TCP] fd removed')
+                logging.warn('[TOU-TCP] fd removed')
 
     def _remote_handle_event(self, fd, evt):
         if fd == self._server_sock_fd:    # UDP in
@@ -128,7 +131,7 @@ class TCPServer(BaseTCPServer):
             if handler:
                 handler.handle_event(fd, evt)
             else:
-                logging.warn('[TCP] fd removed')
+                logging.warn('[TOU-TCP] fd removed')
 
     def _remote_new_handler(self, src):
         handler = self.TCPHandler(self, self._epoll, self._config,
@@ -144,7 +147,7 @@ class TCPServer(BaseTCPServer):
 
         handler = self._remote_new_handler(src)
         handler.handle_event(self._server_sock_fd, evt, data)
-        logging.warn('[TOU] Reseted TCPHandler.')
+        logging.warn('[TOU-TCP] Reseted TCPHandler.')
 
     def handle_event(self, fd, evt):
         if self._is_local:
@@ -216,20 +219,23 @@ class UDPServer(BaseUDPServer):
         listen_addr = '127.0.0.1' if self._is_local else '0.0.0.0'
         listen_port = self._config['tou_listen_udp_port']
         if not listen_port:
-            logging.error('[TOU] Invalid TOU config: tou_listen_udp_port')
+            logging.error('[TOU-UDP] Invalid TOU config: tou_listen_udp_port')
             sys.exit(1)
         addr_info = socket.getaddrinfo(listen_addr, listen_port, 0,
                                        socket.SOCK_DGRAM, socket.SOL_UDP)
         if len(addr_info) == 0:
-            logging.error('[TOU] failed to do getaddrinfo() for tou_udp_server')
+            logging.error(
+                    '[TOU-UDP] failed to do getaddrinfo() for tou_udp_server')
             sys.exit(1)
         af, stype, proto, canname, sa = addr_info[0]
         sock = socket.socket(af, stype, proto)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.setblocking(False)
         sock.bind(sa)
-        logging.info('[TOU] UDP server is listening at %s:%d' % (listen_addr,
-                                                                 listen_port))
+        logging.info(
+                '[TOU-UDP] UDP server is listening at %s:%d' % (listen_addr,
+                                                                listen_port)
+                )
         return sock
 
     def _before_run(self):
@@ -237,8 +243,8 @@ class UDPServer(BaseUDPServer):
                           self._config.get('passwd'),
                           self._config.get('crypto_libpath'),
                           reset_mode=True)
-        logging.info('[UDP] Initialized Cryptor with cipher: %s'\
-                                    % self._config.get('cipher_name'))
+        logging.info('[TOU-UDP] Initialized Cryptor with cipher: %s' %\
+                                            self._config.get('cipher_name'))
         self._excl = SrcExclusiveItems(self._is_local, cryptor)
 
         if (self._config.get('tou_udp_multi_remote') or
@@ -249,7 +255,7 @@ class UDPServer(BaseUDPServer):
             if not self._is_local:
                 self._mkey_2_handler = {}
                 self._available_saddrs = self._config.get('udp_multi_source')
-            logging.info('[UDP] Multi-transmit on')
+            logging.info('[TOU-UDP] Multi-transmit on')
         else:
             self._multi_transmit = False
 

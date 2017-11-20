@@ -104,7 +104,8 @@ class TCPHandler(BaseTCPHandler):
                                                  errno.EWOULDBLOCK):
                 return
         if not data:
-            logging.info('[TCP] Got null data from local socket')
+            logging.info('[TOU-TCP] Got null data from local socket')
+            self.destroy_tcp_sock()
             return
 
         if self._remote_connected:
@@ -130,7 +131,8 @@ class TCPHandler(BaseTCPHandler):
                                                  errno.EWOULDBLOCK):
                 return
         if not data:
-            logging.info('[TCP] Got null data from remote socket')
+            logging.info('[TOU-TCP] Got null data from remote socket')
+            self.destroy_tcp_sock()
             return
 
         self._tou_adapter.tcp_in(data)
@@ -142,7 +144,9 @@ class TCPHandler(BaseTCPHandler):
             self._epoll_modify_2_ro(self._remote_sock)
             self._tou_adapter.feedback_conn_completed()
         except AttributeError:
-            logging.warn('[TOU] TCPHandler._on_remote_connected interrupted')
+            logging.warn(
+                    '[TOU-TCP] TCPHandler._on_remote_connected interrupted')
+            self.destroy_tcp_sock()
 
     # local only
     def _on_local_disconnect(self):
@@ -151,21 +155,21 @@ class TCPHandler(BaseTCPHandler):
             self._data_2_remote = []
             self._tou_adapter.tcp_in(data)
         if not self._data_2_remote:
-            logging.info('[TCP] Local socket got EPOLLRDHUP, do destroy()')
+            logging.info('[TOU-TCP] Local socket got EPOLLRDHUP, do destroy()')
             self.destroy_tcp_sock()
 
     # remote only
     def _on_remote_disconnect(self):
         # at remote side, there is no buffered data in _data_2_local now
-        logging.info('[TCP] Remote socket got EPOLLRDHUP, do destroy()')
+        logging.info('[TOU-TCP] Remote socket got EPOLLRDHUP, do destroy()')
         self.destroy_tcp_sock()
 
     def _on_local_error(self):
-        logging.warn('[TCP] Local socket got EPOLLERR, do destroy()')
+        logging.warn('[TOU-TCP] Local socket got EPOLLERR, do destroy()')
         self.destroy_tcp_sock()
 
     def _on_remote_error(self):
-        logging.warn('[TCP] Remote socket got EPOLLERR, do destroy()')
+        logging.warn('[TOU-TCP] Remote socket got EPOLLERR, do destroy()')
         self.destroy_tcp_sock()
 
     def _on_udp_in(self, data=None, evt=None):
@@ -233,7 +237,7 @@ class TCPHandler(BaseTCPHandler):
     def _on_udp_error(self):
         # We need to keep the UDP socket work, at least it needs to complete
         # UDP disconnection. So, rebuild it if EPOLLERR happends.
-        logging.info('[TOU] UDP socket got EPOLLERR, do rebuild')
+        logging.info('[TOU-UDP] UDP socket got EPOLLERR, do rebuild')
         old_fd = self._tou_adapter.udp_fd
         self._server._remove_handler(old_fd)
         self._epoll.unregister(old_fd)
@@ -288,7 +292,6 @@ class TCPHandler(BaseTCPHandler):
             logging.warn('[TOU-TCP] Socket already destroyed')
             return
 
-        self._tou_adapter.on_tcp_destroyed()
         self._tcp_destroyed = True
         self._destroyed = True
 
@@ -299,7 +302,7 @@ class TCPHandler(BaseTCPHandler):
             self._epoll.unregister(loc_fd)
             self._local_sock.close()
             self._local_sock = None
-            logging.debug('[TOU-TCP] Local socket destroyed, fd: %d' % loc_fd)
+            logging.debug('[TCP] Local socket destroyed, fd: %d' % loc_fd)
         elif not self._is_local and self._remote_sock:
             self._data_2_remote = []
             rmt_fd = self._remote_sock.fileno()
@@ -311,8 +314,9 @@ class TCPHandler(BaseTCPHandler):
                 af = self._dest_af
             else:
                 af = self._remote_af
-            logging.info('[TOU-TCP] Remote socket @ %s:%d destroyed, fd: %d' %\
-                                                                  (*af, rmt_fd))
+            logging.info(
+                '[TCP] Remote socket @ %s:%d destroyed, fd: %d' % (*af, rmt_fd))
+        self._tou_adapter.on_tcp_destroyed()
 
     def destroy_tou_adapter(self):
         if not self._tcp_destroyed:

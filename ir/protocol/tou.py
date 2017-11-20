@@ -504,14 +504,14 @@ class TOUAdapter():
         af_2_bind = af_2_bind or ('127.0.0.1', 0)
         sock.bind(af_2_bind)
         fd = sock.fileno()
-        logging.debug('[TOU] Adapter created UDP socket fd: %d' % fd)
+        logging.debug('[TOU-UDP] Adapter created UDP socket fd: %d' % fd)
         return sock
 
     def rebuild_udp_sock(self):
         binded_af = self._udp_sock.getsockname()
         self._udp_sock.close()
         self._udp_sock = self._init_udp_socket(binded_af)
-        logging.warn('[TOU] UDP socket rebuilt')
+        logging.warn('[TOU-UDP] UDP socket rebuilt')
 
     def connect(self, dest_af):
         packet_params = {'type_': 0, 'dest_af': dest_af}
@@ -569,7 +569,7 @@ class TOUAdapter():
     def tcp_in(self, data):
         if data:
             self._buffer.buff_db(data)
-            logging.debug('[TOU] Adapter buffered %dB of data' % len(data))
+            logging.debug('[TOU-TCP] Adapter buffered %dB of data' % len(data))
 
     def _send_fb(self):
         if not self._final_block_sent:
@@ -750,13 +750,13 @@ class ARQInterface():
         packet = PacketMaker.make_tou_packet(type_=3, ack_type=0,
                                              recvd_serial=recvd_serial)
         self._udp_sock.sendto(packet, self._udp_dest_af)
-        logging.debug('[TOU] ACK sent, serial: %d' % recvd_serial)
+        logging.debug('[TOU-UDP] ACK sent, serial: %d' % recvd_serial)
 
     def send_una(self, recvd_serial):
         packet = PacketMaker.make_tou_packet(type_=3, ack_type=1,
                                              recvd_serial=recvd_serial)
         self._udp_sock.sendto(packet, self._udp_dest_af)
-        logging.debug('[TOU] UNA sent, serial: %d' % recvd_serial)
+        logging.debug('[TOU-UDP] UNA sent, serial: %d' % recvd_serial)
 
     def on_packet_recv(self, packet):
         srl = packet['serial']
@@ -986,7 +986,7 @@ class Window():    # or sender, transmitter, whatever
             self.unackd_serials.append(srl)
 
     def received_correct_ack(self, serial):
-        logging.debug('[TOU] ACK received, serial: %d' % serial)
+        logging.debug('[TOU-UDP] ACK received, serial: %d' % serial)
         if serial in self.unackd_serials:
             self.unackd_serials.remove(serial)
             self._arq_repeater.rm_repetition(serial, self._adapter_id)
@@ -997,7 +997,7 @@ class Window():    # or sender, transmitter, whatever
         return False
 
     def received_correct_una(self, serial):
-        logging.debug('[TOU] UNA received, serial: %d' % serial)
+        logging.debug('[TOU-UDP] UNA received, serial: %d' % serial)
         if serial in self.unackd_serials:
             node = self.unackd_serials.index(serial) + 1
             ackd_serials = self.unackd_serials[:node]
