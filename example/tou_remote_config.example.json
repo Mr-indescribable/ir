@@ -14,7 +14,7 @@
 				 "tou_udp": "/tmp/ir-tou-udp.log"},
 	"crypto_libpath": "/usr/local/lib64/libcrypto.so.1.1",
 
-	"udp_multi_source": ["192.168.122.202", "192.168.122.23"],
+	"udp_multi_source": ["192.168.122.82", "192.168.122.23"],
 	"udp_multi_transmit_times": 1,
 	"udp_multi_transmit_max_packet_serial": 32768,
 	"udp_min_salt_len": 4,

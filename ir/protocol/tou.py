@@ -24,6 +24,7 @@ PKT_TYPE_1_CONN_STAT_REPORT = 1
 PKT_TYPE_2_STREAM_DATA = 2
 PKT_TYPE_3_ACK = 3
 PKT_TYPE_4_REQUEST_PKT = 4
+PKT_TYPE_5_ASSERTION = 5
 
 ACK = 0
 UNA = 1
@@ -32,6 +33,8 @@ CONN_STATUS_0_NO_CONN = 0
 CONN_STATUS_1_CONNECTING = 1
 CONN_STATUS_2_CONNECTED = 2
 CONN_STATUS_3_DISCONNECTED = 3
+
+ASSERTION_PASSIVE_DISCONNECTING = 0
 
 
 '''IR TCP Over UDP
@@ -129,6 +132,7 @@ Field Description:
             0x02: data from TCP stream
             0x03: ACK/UNA
             0x04: asking for lost packet
+            0x05: assertion
 
     BODY.LEN:
         The length of BODY.
@@ -226,6 +230,38 @@ Field Description:
                     LOST.SERIAL:
                         The serial number of the lost data packet.
                         Range: 0x00000000 - 0xFFFFFFFF
+
+            TYPE == 0x05: assertion:
+                Format:
+                    +--------------------+-----------------------+
+                    |       field        |        byte(s)        |
+                    +--------------------+-----------------------+
+                    |    ASSERTION.KEY   |           1           |
+                    +--------------------+-----------------------+
+                    |   ASSERTION.VALUE  |           1           |
+                    +--------------------+-----------------------+
+
+                Description:
+                    The assertion packet is in order to solve the problems
+                    caused by uncertainty. If one side asserted something,
+                    the other side must trust it.
+
+                    ASSERTION.KEY:
+                        The keyword of assertion, just like the key in dict.
+                        Range: 0x00 - 0xFF
+
+                        Currently, there is only one assertion keyword here:
+                            +-----+--------------------------------------------+
+                            | num |                  meaning                   |
+                            +-----+--------------------------------------------+
+                            |  0  | asserter is the passive-disconnecting side |
+                            +-----+--------------------------------------------+
+
+                    ASSERTION.VALUE:
+                        The value of assertion, just like the value in dict.
+                        In most cases, the VALUE will be treated as a boolean.
+                        0x00 is equal to False 0x01 is equal to True.
+                        Range: 0x00 - 0xFF
 '''
 
 
@@ -234,8 +270,8 @@ class PacketMaker():
     @classmethod
     def make_tou_packet(cls, serial=0, amount=1, type_=None, dest_af=None,
                              conn_status=None, data=None, data_serial=None,
-                             ack_type=None, recvd_serial=None,
-                             lost_serial=None, time_=None):
+                             ack_type=None, recvd_serial=None, lost_serial=None,
+                             time_=None, ast_key=None, ast_value=None):
         '''make a TOU data packet
 
         :param type_: the type of this packet. Type: int
@@ -249,6 +285,8 @@ class PacketMaker():
         :param recvd_serial: serial number of the received packet. Type: int
         :param lost_serial: serial number of the lost packet. Type: int
         :param time_: timestamp of this packet from time.time(). Type: int/float
+        :param ast_key: the keyword of assertion. Type: int
+        :param ast_value: the value the assertion. Type: int
 
         :rtype: bytes
         '''
@@ -266,6 +304,10 @@ class PacketMaker():
             body = ack_type + recvd_serial
         elif type_ == PKT_TYPE_4_REQUEST_PKT:
             body = struct.pack('I', lost_serial)
+        elif type_ == PKT_TYPE_5_ASSERTION:
+            ast_key = struct.pack('B', ast_key)
+            ast_value = struct.pack('B', ast_value)
+            body = ast_key + ast_value
 
         serial = struct.pack('I', serial)
         time_ = int((time_ or 0) * 10000000)
@@ -297,6 +339,8 @@ class PacketParser():
                     'ack_type': int or None,
                     'recvd_serial': int or None,
                     'lost_serial': int or None,
+                    'ast_key': int or None,
+                    'ast_value': int or None
                   }
         '''
 
@@ -312,7 +356,9 @@ class PacketParser():
                'data_serial': None,
                'ack_type': None,
                'recvd_serial': None,
-               'lost_serial': None}
+               'lost_serial': None,
+               'ast_key': None,
+               'ast_value': None}
 
         i = 0
         res['serial'] = struct.unpack('I' ,raw_data[i: i + 4])[0]
@@ -345,6 +391,9 @@ class PacketParser():
             res['recvd_serial'] = struct.unpack('I', body[1:])[0]
         elif type_ == PKT_TYPE_4_REQUEST_PKT:
             res['lost_serial'] = struct.unpack('I', body)[0]
+        elif type_ == PKT_TYPE_5_ASSERTION:
+            res['ast_key'] = struct.unpack('B', body[:1])[0]
+            res['ast_value'] = struct.unpack('B', body[1:])[0]
         return res
 
 
@@ -445,11 +494,11 @@ class TOUAdapter():
         # FIN sender is defined as "proactive side", the second FIN sender is
         # defined as "passive side". The passive side need to send the final
         # data block after it receiving the ACK of the FIN.
+        self._standpoint_asserted = False
         self._passive = None
         self._tcp_destroyed = False
         self._fin_sent = False
         self._fin_recvd = False
-        self._disconnect_time = None
         # Just like the FIN_WAIT_* status in TCP but with a little difference.
         # fin_wait_1 means this side is waiting for the ACK of its FIN packet.
         # fin_wait_2 means this side is waiting for the FIN from the other side.
@@ -538,24 +587,36 @@ class TOUAdapter():
                          'conn_status': CONN_STATUS_2_CONNECTED}
         self._buffer.buff_packet(packet_params)
 
+    def _assert(self, key, value):
+        packet_params = {'type_': PKT_TYPE_5_ASSERTION,
+                         'ast_key': key,
+                         'ast_value': value}
+        self._buffer.buff_packet(packet_params)
+        logging.info('[TOU] Asserted %d: %d' % (key, value))
+
+    def assert_passive(self):
+        # assert this side is the passive side of disconnection
+        self._assert(ASSERTION_PASSIVE_DISCONNECTING, 1)
+
+    def assert_proactive(self):
+        # assert this side is the proactive side of disconnection
+        self._assert(ASSERTION_PASSIVE_DISCONNECTING, 0)
+
     def send_fin(self):
         # Here, we send the "status code 3" to tell the other side
         # that the TCP connection at this side has been closed.
         # Just like the FIN in TCP but with a little difference.
 
         if not self._fin_sent and not self._arq_intf.locked:
-            time_ = time.time()
             serial = self._next_serial()
             packet = PacketMaker.make_tou_packet(
                                          serial=serial,
                                          type_=PKT_TYPE_1_CONN_STAT_REPORT,
                                          conn_status=CONN_STATUS_3_DISCONNECTED,
-                                         time_=time_,
                                          )
             self._arq_intf.send_packet(packet, serial)
             self._fin_sent = True
             self._fin_wait_1 = True
-            self._disconnect_time = int(time_ * 10000000)
             logging.debug('[TOU-UDP] FIN sent')
             return True
         return False
@@ -653,26 +714,21 @@ class TOUAdapter():
             elif conn_status == CONN_STATUS_2_CONNECTED:
                 return 'connected', None
             elif conn_status == CONN_STATUS_3_DISCONNECTED:
-                if self._fin_sent:
-                    time_ = packet['time']
-                    if self._disconnect_time > time_:
-                        self._passive = True
-                    elif self._disconnect_time == time_ and self._is_local:
-                        self._passive = True
+                if not self._standpoint_asserted:
+                    if self._fin_sent:
+                        if self._is_local:
+                            self.assert_passive()
+                        else:
+                            self.assert_proactive()
                     else:
-                        self._passive = False
-                else:
-                    self._passive = True
+                        self.assert_passive()
+                        self._passive = True
+                    self._standpoint_asserted = True
 
-                fin_processed = self._fin_sent and self._fin_recvd
-                if not self._passive:
-                    self._final_block_expecting = True
-                elif fin_processed:
-                    self._send_fb()
-
+                logging.debug('[TOU-UDP] FIN received')
                 self._fin_wait_2 = False
                 self._fin_recvd = True
-                logging.debug('[TOU-UDP] FIN received')
+                self._after_standpoint_asserted()
                 return 'disconnect', None
         elif type_ == PKT_TYPE_2_STREAM_DATA and not self._tcp_destroyed:
             data = b''
@@ -682,7 +738,32 @@ class TOUAdapter():
         elif type_ == PKT_TYPE_4_REQUEST_PKT:
             # type 4 is not currently in use
             pass
+        elif type_ == PKT_TYPE_5_ASSERTION:
+            ast_key = packet['ast_key']
+            ast_value = packet['ast_value']
+
+            if ast_key == ASSERTION_PASSIVE_DISCONNECTING:
+                # 1 means the other side asserted it is the passive side
+                next_sp = ast_value != 1
+                if self._standpoint_asserted and self._passive != next_sp:
+                    if self._is_local:
+                        logging.warn(
+                                '[TOU] Assertion conflict, overwrite local side'
+                                )
+                        self._passive = next_sp
+                else:
+                    self._passive = next_sp
+                self._standpoint_asserted = True
+                self._after_standpoint_asserted()
         return None, None
+
+    def _after_standpoint_asserted(self):
+        fin_processed = self._fin_sent and self._fin_recvd
+        if fin_processed:
+            if self._passive:
+                self._send_fb()
+            else:
+                self._final_block_expecting = True
 
     def update_last_recv_time(self):
         self._fb_last_recv_time = time.time()
@@ -822,7 +903,7 @@ class ARQInterface():
         if self._receiver.received_correct_packet(packet):
             # We have to make sure the other side has received the final ACK
             # The way to ensure this is expect it stop sending the final block.
-            # So, the passive side cannot close UDP socket proactively.
+            # So, the proactive side cannot close UDP socket proactively.
             self.send_ack(packet['serial'])
             self._tou_adapter.update_last_recv_time()
             self._last_recvd_serial = self._receiver.tail_serial

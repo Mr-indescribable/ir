@@ -15,7 +15,7 @@ from ir.protocol.tou import PacketParser as TOUPacketParser
 from ir.protocol.tou import TOUAdapter
 
 
-__all__ = ['TCPHandler', 'UDPHandler']
+__all__ = ['TCPHandler', 'UDPHandler', 'UDPMultiTransmitHandler']
 
 
 UP_STREAM_BUF_SIZE = 16384
