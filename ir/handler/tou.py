@@ -49,6 +49,7 @@ class TCPHandler(BaseTCPHandler):
         self._data_2_remote = []
         self._remote_af = None
         self._remote_sock = None
+        self._remote_connection_requested = False
         self._remote_connected = False
         self._fpacket_handled = False
         self._waiting_for_destroy = False
@@ -178,15 +179,29 @@ class TCPHandler(BaseTCPHandler):
 
         cmd, param = self._tou_adapter.on_udp_in(data)
 
+        if (not self._is_local and cmd is not None and
+                not self._remote_connection_requested and cmd != 'connect'):
+            # At the remote side,
+            # the first command must be the "connect" command
+            logging.warn(
+                '[TOU-UDP] Got cmd %s before remote connection requested' % cmd
+            )
+            return
+
         if cmd == 'connect':
             # Then command "connect" only appears at the remote side
             # when the local side requests a connection
             if not self._remote_connected:
+                if self._remote_connection_requested:
+                    logging.warn(
+                        '[TOU-UDP] Dropped duplicated connection info packet'
+                    )
                 self._remote_af = param
                 self._remote_sock = self._create_remote_sock(self._remote_af)
                 evts = select.EPOLLIN | select.EPOLLOUT | select.EPOLLRDHUP
                 self._add_sock_to_poll(self._remote_sock, evts)
                 self._fpacket_handled = True
+                self._remote_connection_requested = True
             else:
                 # If this handler already connected to the destination server
                 # and we receive a connection request again, then we can know
@@ -360,6 +375,45 @@ class UDPHandler(BaseUDPHandler):
             remote_addr = self._config.get('remote_addr')
             remote_udp_port = self._config.get('tou_remote_udp_port')
             self._remote_af = (remote_addr, remote_udp_port)
+
+    def _after_init(self):
+        if self._is_local:
+            self._server._sp_2_handler[self.sp] = self
+        else:
+            self._server._csp_2_handler[self.csp] = self
+
+    def destroy(self):
+        if self._destroyed:
+            logging.warn('[UDP] Handler already destroyed')
+            return False
+
+        self._destroyed = True
+
+        fd = None
+        if hasattr(self, '_return_sock') and self._return_sock:
+            self._return_sock.close()
+            self._return_sock = None
+        if hasattr(self, '_client_sock') and self._client_sock:
+            fd = self._client_sock.fileno()
+            self._epoll.unregister(fd)
+            self._client_sock.close()
+            self._client_sock = None
+        if fd:
+            self._server._remove_handler(fd=fd)
+        if self._key:
+            self._server._remove_handler(key=self._key)
+        if self._mkey:
+            self._server._remove_handler(mkey=self._mkey)
+        logging.debug('[UDP] Handler destroyed')
+        return True
+
+    @property
+    def sp(self):    # the source port
+        return self._src[1]
+
+    @property
+    def csp(self):    # the binded port of client_sock
+        return self._client_sock.getsockname()[1]
 
 
 class UDPMultiTransmitHandler(BaseMTH):

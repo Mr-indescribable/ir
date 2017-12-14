@@ -12,29 +12,22 @@ import logging
 from threading import Thread, Event
 
 from ir.protocol.base import AfConverter
+from ir.protocol.tou_consts import *
 
 
-__all__ = ['PacketMaker', 'PacketParser']
+__all__ = ['PacketMaker',
+           'PacketParser',
+           'CtrlPacketMaker',
+           'CtrlPacketParser',
+           'Buffer',
+           'TOUAdapter',
+           'ARQInterface',
+           'Receiver',
+           'Window',
+           'ARQRepeater']
 
 
 UDP_BUFFER_SIZE = 65536
-
-PKT_TYPE_0_CONN_INFO = 0
-PKT_TYPE_1_CONN_STAT_REPORT = 1
-PKT_TYPE_2_STREAM_DATA = 2
-PKT_TYPE_3_ACK = 3
-PKT_TYPE_4_REQUEST_PKT = 4
-PKT_TYPE_5_ASSERTION = 5
-
-ACK = 0
-UNA = 1
-
-CONN_STATUS_0_NO_CONN = 0
-CONN_STATUS_1_CONNECTING = 1
-CONN_STATUS_2_CONNECTED = 2
-CONN_STATUS_3_DISCONNECTED = 3
-
-ASSERTION_PASSIVE_DISCONNECTING = 0
 
 
 '''IR TCP Over UDP
@@ -397,6 +390,78 @@ class PacketParser():
         return res
 
 
+class CtrlPacketMaker():
+
+    '''
+    Introduction:
+        The TCPServer needs to cooperate with the UDPServer. So we need a kind
+        of packet to transfer some information about cooperation. This kind of
+        packet will only be transmitted locally, it will not enter the internet
+        so that we don't need to verify it and return an ACK for it.
+        And the CtrlSocket will also listen at 127.0.0.1 only.
+
+
+    Packet Format:
+        +--------------------+-----------------------+
+        |       field        |        byte(s)        |
+        +--------------------+-----------------------+
+        |       TYPE         |           1           |
+        +--------------------+-----------------------+
+        |       PARAM        |  ALL THESE LEFT BYTES |
+        +--------------------+-----------------------+
+
+    Field Description:
+        TYPE:
+            Just the type of this packet
+            Range: 0x00 - 0xFF
+
+        PARAM:
+            Parameters, the content of PARAM field is depends on the TYPE.
+
+    Inusing Type List:
+        +-------+---------------------------------+
+        | TYPE  |           DESCRIPTION           |
+        +-------+---------------------------------+
+        | 0x00  |   Handler descruction signal    |
+        +-------+---------------------------------+
+    '''
+
+    @classmethod
+    def make_handler_destruction_signal(cls, csp=None):
+        ''' The original UDPServer will destroy the handler when it idle for
+        some time. In TOU mode, this will cause many problem. Because I use
+        the source port to distinguish every TCP connection in UDP transmission.
+        So, I decided to control the destruction of UDPHandler with this signal.
+        It should be handled like a TCP connection, UDPHandler should not be
+        destroyed until the TCP connection is destroyed. Actually, the
+        destruction of UDPHandlers now is controlled by the TOUAdapter.
+
+        :param csp: The binded port of the client_sock in UDPHandler.
+                    This parameter only warks at remote side. At the local side,
+                    we don't need to send any parameter, the source port of the
+                    UDP packet we sent is the parameter we needed. type: int
+        :rtype: bytes
+        '''
+
+        type_ = struct.pack('B', CTRL_TYPE_0_SIG_DESTROY_HANDLER)
+        csp = struct.pack('H', csp) if csp else b''
+        return type_ + csp
+
+
+class CtrlPacketParser():
+
+    @classmethod
+    def parse_ctrl_packet(cls, packet):
+        type_ = packet[0]
+        param = {}
+
+        if type_ == CTRL_TYPE_0_SIG_DESTROY_HANDLER:
+            if len(packet) == 3:
+                csp = struct.unpack('H', packet[1:])[0]
+                param['csp'] = csp
+
+        return type_, param
+
 class Buffer():
 
     def __init__(self, tou_adapter, max_db_size):
@@ -608,15 +673,13 @@ class TOUAdapter():
         # Just like the FIN in TCP but with a little difference.
 
         if not self._fin_sent and not self._arq_intf.locked:
-            serial = self._next_serial()
-            packet = PacketMaker.make_tou_packet(
-                                         serial=serial,
-                                         type_=PKT_TYPE_1_CONN_STAT_REPORT,
-                                         conn_status=CONN_STATUS_3_DISCONNECTED,
-                                         )
-            self._arq_intf.send_packet(packet, serial)
+            packet_params = {'type_': PKT_TYPE_1_CONN_STAT_REPORT,
+                             'conn_status': CONN_STATUS_3_DISCONNECTED}
+            self._buffer.buff_packet(packet_params)
+
             self._fin_sent = True
             self._fin_wait_1 = True
+            self._transmission_finished = True
             logging.debug('[TOU-UDP] FIN sent')
             return True
         return False
@@ -685,13 +748,11 @@ class TOUAdapter():
                 return None, None
         if self._final_block_expecting:
             if self._arq_intf.final_block_recvd(packet):
-                self._transmission_finished = True
                 self.update_last_recv_time()
                 logging.debug('[TOU-UDP] FB received')
                 return 'wait_for_destroy', None
         if type_ == PKT_TYPE_3_ACK and self._final_ack_expecting:
             if self._arq_intf.final_ack_recvd(packet):
-                self._transmission_finished = True
                 self._arq_intf.close()
                 return 'destroy', None
         return self._normal_udp_in(packet)
@@ -775,10 +836,17 @@ class TOUAdapter():
 
     def destroy(self):
         # at remote side, we use the server socket in TOUAdapter
+        sig_dest = ('127.0.0.1', self._config['tou_udp_ctrl_port'])
         if self._is_local:
+            signal = CtrlPacketMaker.make_handler_destruction_signal()
+            self._udp_sock.sendto(signal, sig_dest)
             self._buffer.clean()
             self._udp_sock.close()
             self._udp_sock = None
+        else:
+            csp = self._src[1]
+            signal = CtrlPacketMaker.make_handler_destruction_signal(csp)
+            self._udp_sock.sendto(signal, sig_dest)
         del self._arq_intf
 
     @property
@@ -1123,31 +1191,48 @@ class Window():    # or sender, transmitter, whatever
 
 class ARQRepeater(Thread):
 
-    def __init__(self):
+    def __init__(self, min_rpt_times, max_rpt_times):
         Thread.__init__(self, daemon=True)
 
         self._running = False
         self._evt = Event()
         self._schd = sched.scheduler()
-        self.task_list = []
-        self.task_map = {}    # {"adapter_id-pkt_serial": task}
+        self.task_list = []    # [id(task_func)]
+        self.task_map = {}     # {"task_key": task}
+
+        self._min_rpt_times = min_rpt_times
+        self._max_rpt_times = max_rpt_times
+        self._rpt_time_map = {}        # {"task_key": num_of_times}
+        self._max_rpt_time_map = {}    # {"task_key": max_num_of_times}
 
     def _activate(self):
         if not self._running:
             self._evt.set()
 
-    def _gen_task_key(self, adapter_id, serial):
+    def _rand_max_rpt_times(self):
+        return random.randint(self._min_rpt_times, self._max_rpt_times)
+
+    def _gen_task_key(self, serial, adapter_id):
         return '%d-%d' % (adapter_id, serial)
 
     def _add_task(self, interval, func, serial, adapter_id):
         def repeat():
             if id(func) in self.task_list:
-                func()
-                self._schd.enter(interval, 1, repeat)
+                task_key = self._gen_task_key(serial, adapter_id)
+                max_rptt = self._max_rpt_time_map[task_key]
+                rptt = self._rpt_time_map[task_key]
+                if rptt <= max_rptt:
+                    func()
+                    self._schd.enter(interval, 1, repeat)
+                    self._rpt_time_map[task_key] += 1
+                else:
+                    self.rm_repetition(serial, adapter_id)
 
         self.task_list.append(id(func))
-        task_key = self._gen_task_key(adapter_id, serial)
+        task_key = self._gen_task_key(serial ,adapter_id)
         self.task_map[task_key] = func
+        self._max_rpt_time_map[task_key] = self._rand_max_rpt_times()
+        self._rpt_time_map[task_key] = 0
         repeat()
         self._activate()
 
@@ -1163,12 +1248,19 @@ class ARQRepeater(Thread):
         self._add_task(interval, send, serial, adapter_id)
 
     def rm_repetition(self, serial, adapter_id):
-        task_key = self._gen_task_key(adapter_id, serial)
+        task_key = self._gen_task_key(serial, adapter_id)
         task = self.task_map.get(task_key)
         tid = id(task)
         if tid in self.task_list:
+            rptt = self._rpt_time_map[task_key]
             self.task_list.remove(tid)
             del(self.task_map[task_key])
+            del(self._max_rpt_time_map[task_key])
+            del(self._rpt_time_map[task_key])
+            logging.debug(
+                '[TOU] Removed repetition %s, repeated times: %d' % (task_key,
+                                                                     rptt)
+            )
 
     def run(self):
         while True:

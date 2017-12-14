@@ -34,6 +34,9 @@
 	"tou_min_tu": 1024,
 	"tou_max_tu": 8192,
 	"tou_arq_rto": 0.2,
+	"tou_arq_min_repeat_times": 10,
+	"tou_arq_max_repeat_times": 20,
 	"tou_max_upstm_window_size": 32,
-	"tou_max_dnstm_window_size": 96
+	"tou_max_dnstm_window_size": 96,
+	"tou_udp_ctrl_port": 6061
 }
