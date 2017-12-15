@@ -50,17 +50,18 @@ class ServerMixin(object):
         pass
 
     def _load_handler(self):
-        from ir.handler.base import (TCPHandler,
-                                     UDPHandler,
-                                     UDPMultiTransmitHandler)
+        from ir.handler.base import (
+            TCPHandler, UDPHandler, UDPMultiTransmitHandler
+        )
 
         self.TCPHandler = TCPHandler
         self.UDPHandler = UDPHandler
         self.UDPMultiTransmitHandler = UDPMultiTransmitHandler
 
     def _read_config(self, config_path):
-        return tools.Initer.init_from_config_file(config_path,
-                                                  self._server_type)
+        return tools.Initer.init_from_config_file(
+                   config_path, self._server_type
+               )
 
     def _add_handler(self, fd, handler):
         # in tcp mode, a handler will have multiple fd
@@ -78,8 +79,9 @@ class ServerMixin(object):
         pass
 
     def run(self):
-        preload_crypto_lib(self._config.get('cipher_name'),
-                           self._config.get('crypto_libpath'))
+        preload_crypto_lib(
+            self._config.get('cipher_name'), self._config.get('crypto_libpath')
+        )
         self._before_run()
         self.__running = True
         try:
@@ -106,18 +108,24 @@ class TCPServer(ServerMixin):
 
     def _before_run(self):
         # initialize a iv_cryptor with default iv
-        self._iv_cryptor = Cryptor(self._config.get('cipher_name'),
-                                   self._config.get('passwd'),
-                                   self._config.get('crypto_libpath'),
-                                   reset_mode=True)
-        logging.info('[TCP] Initialized Cryptor with cipher: %s'\
-                                    % self._config.get('cipher_name'))
+        self._iv_cryptor = Cryptor(
+                               self._config.get('cipher_name'),
+                               self._config.get('passwd'),
+                               self._config.get('crypto_libpath'),
+                               reset_mode=True
+                           )
+        logging.info(
+            '[TCP] Initialized Cryptor with cipher: '
+            '%s' % self._config.get('cipher_name')
+        )
 
     def _init_socket(self, so_backlog=1024):
         listen_addr = self._config['listen_addr']
         listen_port = self._config['listen_tcp_port']
-        addr_info = socket.getaddrinfo(listen_addr, listen_port, 0,
-                                       socket.SOCK_STREAM, socket.SOL_TCP)
+        addr_info = socket.getaddrinfo(
+                        listen_addr, listen_port, 0,
+                        socket.SOCK_STREAM, socket.SOL_TCP
+                    )
         if len(addr_info) == 0:
             logging.error('[TCP] getaddrinfo failed in TCPServer._init_socket')
             sys.exit(1)
@@ -128,9 +136,10 @@ class TCPServer(ServerMixin):
         sock.setblocking(False)
         sock.bind(sa)
         sock.listen(so_backlog)
-        logging.info('[TCP] Server is listening at %s:%d' % (
-                                    self._config['listen_addr'],
-                                    self._config['listen_tcp_port']))
+        logging.info(
+            '[TCP] Server is listening at %s:%d' % (self._config['listen_addr'],
+                                                self._config['listen_tcp_port'])
+        )
         return sock
 
     def handle_event(self, fd, evt):
@@ -138,14 +147,16 @@ class TCPServer(ServerMixin):
         if fd == self._server_sock_fd and not handler:
             try:
                 conn, src = self._server_sock.accept()
-                logging.info('[TCP] Accepted connection from %s:%d, fd: %d' %\
-                                                        (*src, conn.fileno()))
-                self.TCPHandler(self, conn, src, self._epoll,
-                                self._config, self._is_local)
+                logging.info(
+                    '[TCP] Accepted connection from %s:%d, '
+                    'fd: %d' % (*src, conn.fileno())
+                )
+                self.TCPHandler(
+                    self, conn, src, self._epoll, self._config, self._is_local
+                )
             except (OSError, IOError) as e:
-                error_no = tools.errno_from_exception(e)
-                if error_no in (errno.EAGAIN, errno.EINPROGRESS,
-                                errno.EWOULDBLOCK):
+                eno = tools.errno_from_exception(e)
+                if eno in (errno.EAGAIN, errno.EINPROGRESS, errno.EWOULDBLOCK):
                     return
         else:
             if handler:
@@ -185,8 +196,10 @@ class UDPServer(ServerMixin):
     def _init_socket(self):
         listen_addr = self._config['listen_addr']
         listen_port = self._config['listen_udp_port']
-        addr_info = socket.getaddrinfo(listen_addr, listen_port, 0,
-                                       socket.SOCK_DGRAM, socket.SOL_UDP)
+        addr_info = socket.getaddrinfo(
+                        listen_addr, listen_port, 0,
+                        socket.SOCK_DGRAM, socket.SOL_UDP
+                    )
         if len(addr_info) == 0:
             logging.error('[UDP] getaddrinfo failed in UDPServer._init_socket')
             sys.exit(1)
@@ -198,24 +211,30 @@ class UDPServer(ServerMixin):
             sock.setsockopt(socket.SOL_IP, IP_TRANSPARENT, 1)
         sock.setblocking(False)
         sock.bind(sa)
-        logging.info('[UDP] Server is listening at %s:%d' % (
-                                    self._config['listen_addr'],
-                                    self._config['listen_udp_port']))
+        logging.info(
+            '[UDP] Server is listening at %s:%d' % (self._config['listen_addr'],
+                                                self._config['listen_udp_port'])
+        )
         return sock
 
     def _before_run(self):
-        cryptor = Cryptor(self._config.get('cipher_name'),
-                          self._config.get('passwd'),
-                          self._config.get('crypto_libpath'),
-                          reset_mode=True)
-        logging.info('[UDP] Initialized Cryptor with cipher: %s'\
-                                    % self._config.get('cipher_name'))
+        cryptor = Cryptor(
+                      self._config.get('cipher_name'),
+                      self._config.get('passwd'),
+                      self._config.get('crypto_libpath'),
+                      reset_mode=True
+                  )
+        logging.info(
+            '[UDP] Initialized Cryptor with cipher: '
+            '%s' % self._config.get('cipher_name')
+        )
         self._excl = SrcExclusiveItems(self._is_local, cryptor)
 
         if (self._config.get('udp_multi_remote') or
                 self._config.get('udp_multi_source')):
-            self._mth = self.UDPMultiTransmitHandler(self._config,
-                                                     self._is_local)
+            self._mth = self.UDPMultiTransmitHandler(
+                            self._config, self._is_local
+                        )
             self._multi_transmit = True
             if not self._is_local:
                 self._mkey_2_handler = {}
@@ -241,11 +260,13 @@ class UDPServer(ServerMixin):
             self._excl.reset()
         if cmd == self._excl.Cmd.SEND_IV:
             logging.info('[IV_MNG] Sending new iv to server')
-            cryptor = Cryptor(self._config.get('cipher_name'),
-                              self._config.get('passwd'),
-                              self._config.get('crypto_libpath'),
-                              iv=iv,
-                              reset_mode=True)
+            cryptor = Cryptor(
+                          self._config.get('cipher_name'),
+                          self._config.get('passwd'),
+                          self._config.get('crypto_libpath'),
+                          iv=iv,
+                          reset_mode=True
+                      )
             self._excl.nc_in_progress = cryptor
             self._excl.current_cryptor = cryptor
             if self._excl.new_cryptor_a:
@@ -270,11 +291,13 @@ class UDPServer(ServerMixin):
             self._excl.reset()
         if cmd == self._excl.Cmd.DO_CONFIRM:
             logging.info('[IV_MNG] Confirm iv change for %s' % src_af[0])
-            cryptor = Cryptor(self._config.get('cipher_name'),
-                              self._config.get('passwd'),
-                              self._config.get('crypto_libpath'),
-                              iv=iv,
-                              reset_mode=True)
+            cryptor = Cryptor(
+                          self._config.get('cipher_name'),
+                          self._config.get('passwd'),
+                          self._config.get('crypto_libpath'),
+                          iv=iv,
+                          reset_mode=True
+                      )
             self._excl.nc_in_progress = cryptor
             self._excl.current_cryptor = cryptor
             if not self._excl.new_cryptor_a:
@@ -291,8 +314,9 @@ class UDPServer(ServerMixin):
             logging.info('[IV_MNG] Updated cryptor for %s' % src_af[0])
 
     def _local_server_socket_recv(self):
-        data, anc, f, src = self._server_sock.recvmsg(UDP_BUFFER_SIZE,
-                                                     socket.CMSG_SPACE(24))
+        data, anc, f, src = self._server_sock.recvmsg(
+                                UDP_BUFFER_SIZE, socket.CMSG_SPACE(24)
+                            )
         sock_opt = tools.unpack_sockopt(anc[0][2])
         dest = ('.'.join([str(u) for u in sock_opt[2:]]), sock_opt[1])
         return data, src, dest
@@ -303,7 +327,8 @@ class UDPServer(ServerMixin):
         res = PacketParser.parse_udp_packet(cryptor, data)
         if not res['valid']:
             err_msg = '[UDP] Got invalid packet from %s:%d' % src
-            if not (self._excl.old_cryptor and cryptor != self._excl.old_cryptor):
+            if not (self._excl.old_cryptor and
+                    cryptor != self._excl.old_cryptor):
                 logging.info(err_msg)
                 return None, None, None
 
@@ -324,8 +349,8 @@ class UDPServer(ServerMixin):
 
         # local lost iv
         if (res['iv'] and cryptor == self._excl._default_cryptor and
-            self._excl.current_cryptor != self._excl._default_cryptor and
-            self._excl.old_cryptor != self._excl._default_cryptor):
+                self._excl.current_cryptor != self._excl._default_cryptor and
+                self._excl.old_cryptor != self._excl._default_cryptor):
             self._excl.reset()
 
         decrypted_by_nc = cryptor == self._excl.nc_in_progress
@@ -351,16 +376,18 @@ class UDPServer(ServerMixin):
                 if self._multi_transmit and not self._is_local:
                     if src[0] not in self._available_saddrs:
                         logging.info(
-                                '[UDP] Got request from unavailable source')
+                            '[UDP] Got request from unavailable source'
+                        )
                         return
 
                     mkey = self._gen_handler_mkey(src, dest)
                     handler = self._mkey_2_handler.get(mkey)
                     if not (handler and handler.update_last_call_time()):
-                        handler = self.UDPHandler(src, dest, self,
-                                                  self._server_sock,
-                                                  self._epoll, self._config,
-                                                  self._is_local, mkey=mkey)
+                        handler = self.UDPHandler(
+                                      src, dest, self, self._server_sock,
+                                      self._epoll, self._config,
+                                      self._is_local, mkey=mkey
+                                  )
                     if data:
                         handler.handle_local_recv(data)
                     else:
@@ -369,10 +396,11 @@ class UDPServer(ServerMixin):
                     key = self._gen_handler_key(src, dest)
                     handler = self._key_2_handler.get(key)
                     if not (handler and handler.update_last_call_time()):
-                        handler = self.UDPHandler(src, dest, self,
-                                                  self._server_sock,
-                                                  self._epoll, self._config,
-                                                  self._is_local, key)
+                        handler = self.UDPHandler(
+                                      src, dest, self, self._server_sock,
+                                      self._epoll, self._config,
+                                      self._is_local, key
+                                  )
                         self._key_2_handler[key] = handler
                     handler.handle_local_recv(data)
         else:
@@ -388,7 +416,8 @@ class UDPServer(ServerMixin):
                     # drop the packet.
                     if not handler.update_last_call_time():
                         logging.info(
-                                '[UDP] Response timeout, handler destroyed')
+                            '[UDP] Response timeout, handler destroyed'
+                        )
                         return
                     handler.handle_remote_resp()
                 else:

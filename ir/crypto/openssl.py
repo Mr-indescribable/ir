@@ -34,8 +34,9 @@ def new_cipher_ctx(cipher_name, key, iv, mod):
 
     cipher_ctx = libcrypto.EVP_CIPHER_CTX_new()
     cipher = libcrypto.EVP_get_cipherbyname(cipher_name)
-    r = libcrypto.EVP_CipherInit_ex(cipher_ctx, cipher, None,
-                                    key, iv, c_int(mod))
+    r = libcrypto.EVP_CipherInit_ex(
+            cipher_ctx, cipher, None, key, iv, c_int(mod)
+        )
     if not r:
         raise Exception('cipher init failed')
     return cipher_ctx, cipher
@@ -79,8 +80,9 @@ class OpenSSLCryptor(object):
         buf_size = self.buf_size if self.buf_size >= inl else inl * 2
         out = create_string_buffer(buf_size)
         outl = c_long(0)
-        libcrypto.EVP_CipherUpdate(self._cph_ctx, byref(out),
-                                   byref(outl), in_, inl)
+        libcrypto.EVP_CipherUpdate(
+            self._cph_ctx, byref(out), byref(outl), in_, inl
+        )
         return out.raw[:outl.value]
 
     def clean(self):
@@ -93,8 +95,10 @@ class OpenSSLCryptor(object):
 
     def reset(self):
         libcrypto.EVP_CIPHER_CTX_reset(self._cph_ctx)
-        libcrypto.EVP_CipherInit_ex(self._cph_ctx, self._cph, None,
-                                    self._key, self._iv, c_int(self._mod))
+        libcrypto.EVP_CipherInit_ex(
+            self._cph_ctx, self._cph, None,
+            self._key, self._iv, c_int(self._mod)
+        )
 
     def __del__(self):
         self.clean()

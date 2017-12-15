@@ -61,13 +61,16 @@ class TCPHandler(BaseTCPHandler):
         if self._is_local:
             events = select.EPOLLIN | select.EPOLLRDHUP
             self._add_sock_to_poll(self._local_sock, events)
-            self._tou_adapter = TOUAdapter(arq_repeater, self._config,
-                                           self._is_local, src)
+            self._tou_adapter = TOUAdapter(
+                                    arq_repeater, self._config,
+                                    self._is_local, src
+                                )
             self._add_sock_to_poll(self._tou_adapter._udp_sock, select.EPOLLIN)
         else:
-            self._tou_adapter = TOUAdapter(arq_repeater, self._config,
-                                           self._is_local, src,
-                                           self._server.server_sock)
+            self._tou_adapter = TOUAdapter(
+                                    arq_repeater, self._config, self._is_local,
+                                    src, self._server.server_sock
+                                )
 
         if self._is_local:
             self._dest_af = self._local_get_dest_af()
@@ -101,8 +104,8 @@ class TCPHandler(BaseTCPHandler):
         try:
             data = self._local_sock.recv(buf_size)
         except (OSError, IOError) as e:
-            if tools.errno_from_exception(e) in (errno.ETIMEDOUT, errno.EAGAIN,
-                                                 errno.EWOULDBLOCK):
+            eno = tools.errno_from_exception(e)
+            if eno in (errno.ETIMEDOUT, errno.EAGAIN, errno.EWOULDBLOCK):
                 return
         if not data:
             logging.info('[TOU-TCP] Got null data from local socket')
@@ -128,8 +131,8 @@ class TCPHandler(BaseTCPHandler):
         try:
             data = self._remote_sock.recv(buf_size)
         except (OSError, IOError) as e:
-            if tools.errno_from_exception(e) in (errno.ETIMEDOUT, errno.EAGAIN,
-                                                 errno.EWOULDBLOCK):
+            eno = tools.errno_from_exception(e)
+            if eno in (errno.ETIMEDOUT, errno.EAGAIN, errno.EWOULDBLOCK):
                 return
         if not data:
             logging.info('[TOU-TCP] Got null data from remote socket')
@@ -146,7 +149,8 @@ class TCPHandler(BaseTCPHandler):
             self._tou_adapter.feedback_conn_completed()
         except AttributeError:
             logging.warn(
-                    '[TOU-TCP] TCPHandler._on_remote_connected interrupted')
+                '[TOU-TCP] TCPHandler._on_remote_connected interrupted'
+            )
             self.destroy_tcp_sock()
 
     # local only
@@ -330,7 +334,8 @@ class TCPHandler(BaseTCPHandler):
             else:
                 af = self._remote_af
             logging.info(
-                '[TCP] Remote socket @ %s:%d destroyed, fd: %d' % (*af, rmt_fd))
+                '[TCP] Remote socket @ %s:%d destroyed, fd: %d' % (*af, rmt_fd)
+            )
         self._tou_adapter.on_tcp_destroyed()
 
     def destroy_tou_adapter(self):

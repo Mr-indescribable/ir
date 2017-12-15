@@ -53,10 +53,14 @@ class Cryptor(object):
         self._init_ciphers()
 
     def _init_ciphers(self):
-        self._cipher = self._cipher_cls(self._cipher_name, self._key,
-                                        self._iv, 1, self._libpath)
-        self._decipher = self._cipher_cls(self._cipher_name, self._key,
-                                          self._iv, 0, self._libpath)
+        self._cipher = self._cipher_cls(
+                           self._cipher_name, self._key,
+                           self._iv, 1, self._libpath
+                       )
+        self._decipher = self._cipher_cls(
+                             self._cipher_name, self._key,
+                             self._iv, 0, self._libpath
+                         )
 
     def reset(self):
         self._cipher.reset()

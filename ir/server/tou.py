@@ -92,9 +92,9 @@ class TCPServer(BaseTCPServer):
             sock.bind((listen_addr, listen_port))
 
         logging.info(
-                '[TOU-TCP] TCP Server is listening at %s:%d' % (listen_addr,
-                                                                listen_port)
-                )
+            '[TOU-TCP] TCP Server is listening at '
+            '%s:%d' % (listen_addr, listen_port)
+        )
         return sock
 
     def _local_handle_event(self, fd, evt):
@@ -104,16 +104,16 @@ class TCPServer(BaseTCPServer):
                 local_sock, src = self._server_sock.accept()
                 c_fd = local_sock.fileno()
                 logging.info(
-                    '[TOU-TCP] Accepted connection from %s:%d, fd: %d' % (*src,
-                                                                          c_fd)
-                    )
-                self.TCPHandler(self, self._epoll, self._config,
-                                self._arq_repeater, self._is_local,
-                                src, local_sock)
+                    '[TOU-TCP] Accepted connection from %s:%d, '
+                    'fd: %d' % (*src, c_fd)
+                )
+                self.TCPHandler(
+                    self, self._epoll, self._config, self._arq_repeater,
+                    self._is_local, src, local_sock
+                )
             except (OSError, IOError) as e:
-                error_no = tools.errno_from_exception(e)
-                if error_no in (errno.EAGAIN, errno.EINPROGRESS,
-                                errno.EWOULDBLOCK):
+                eno = tools.errno_from_exception(e)
+                if eno in (errno.EAGAIN, errno.EINPROGRESS, errno.EWOULDBLOCK):
                     return
         else:
             if handler:
@@ -137,8 +137,10 @@ class TCPServer(BaseTCPServer):
                 logging.warn('[TOU-TCP] fd removed')
 
     def _remote_new_handler(self, src):
-        handler = self.TCPHandler(self, self._epoll, self._config,
-                                  self._arq_repeater, self._is_local, src, None)
+        handler = self.TCPHandler(
+                      self, self._epoll, self._config, self._arq_repeater,
+                      self._is_local, src, None
+                  )
         self._udp_src_port_2_handler[src[1]] = handler
         return handler
 
@@ -339,16 +341,18 @@ class UDPServer(BaseUDPServer):
                 if self._multi_transmit and not self._is_local:
                     if src[0] not in self._available_saddrs:
                         logging.info(
-                                '[UDP] Got request from unavailable source')
+                            '[UDP] Got request from unavailable source'
+                        )
                         return
 
                     mkey = self._gen_handler_mkey(src, dest)
                     handler = self._mkey_2_handler.get(mkey)
                     if not (handler and handler.update_last_call_time()):
-                        handler = self.UDPHandler(src, dest, self,
-                                                  self._server_sock,
-                                                  self._epoll, self._config,
-                                                  self._is_local, mkey=mkey)
+                        handler = self.UDPHandler(
+                                      src, dest, self, self._server_sock,
+                                      self._epoll, self._config,
+                                      self._is_local, mkey=mkey
+                                  )
                     if data:
                         handler.handle_local_recv(data)
                     else:
@@ -357,10 +361,11 @@ class UDPServer(BaseUDPServer):
                     key = self._gen_handler_key(src, dest)
                     handler = self._key_2_handler.get(key)
                     if not (handler and handler.update_last_call_time()):
-                        handler = self.UDPHandler(src, dest, self,
-                                                  self._server_sock,
-                                                  self._epoll, self._config,
-                                                  self._is_local, key)
+                        handler = self.UDPHandler(
+                                      src, dest, self, self._server_sock,
+                                      self._epoll, self._config,
+                                      self._is_local, key
+                                  )
                         self._key_2_handler[key] = handler
                     handler.handle_local_recv(data)
         else:
@@ -376,7 +381,8 @@ class UDPServer(BaseUDPServer):
                     # drop the packet.
                     if not handler.update_last_call_time():
                         logging.info(
-                                '[UDP] Response timeout, handler destroyed')
+                            '[UDP] Response timeout, handler destroyed'
+                        )
                         return
                     handler.handle_remote_resp()
                 else:

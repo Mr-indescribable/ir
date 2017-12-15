@@ -9,7 +9,7 @@ from ir.crypto import Cryptor
 from ir.tools import HashTools
 
 
-__all__ = ['PacketMaker', 'PacketParser', 'IVManager']
+__all__ = ['AfConverter', 'PacketMaker', 'PacketParser', 'IVManager']
 
 
 '''The Basic Protocol of IR
@@ -396,7 +396,7 @@ class PacketMaker():
 
         head = salt_len + salt
         tail = serial + time_ + iv_len + iv +\
-                dest_af_len + dest_af + data_len + data
+                 dest_af_len + dest_af + data_len + data
         mac = HashTools.smd5(head + tail).encode('utf-8')
         mac_len = struct.pack('B', len(mac))
         r_data = head + mac_len + mac + tail
@@ -460,10 +460,10 @@ class PacketParser():
             # if we get an error here, it means this is a invalid packet
             return res
 
-        cryptor = Cryptor(config.get('cipher_name'),
-                          config.get('passwd'),
-                          config.get('crypto_libpath'),
-                          iv)
+        cryptor = Cryptor(
+                      config.get('cipher_name'), config.get('passwd'),
+                      config.get('crypto_libpath'), iv
+                  )
         payload = cryptor.decrypt(raw_data[i:])
 
         try:
@@ -484,20 +484,18 @@ class PacketParser():
         except Exception:
             return res
 
-        res = {
-                'valid': False,
-                'raw_iv_len': raw_iv_len,
-                'iv_len': iv_len,
-                'iv': iv,
-                'mac_len': mac_len,
-                'mac': mac,
-                'raw_dest_af_len': raw_dest_af_len,
-                'dest_af_len': dest_af_len,
-                'raw_dest_af': raw_dest_af,
-                'dest_af': dest_af,
-                'data': data,
-                'cryptor': cryptor,
-                }
+        res = {'valid': False,
+               'raw_iv_len': raw_iv_len,
+               'iv_len': iv_len,
+               'iv': iv,
+               'mac_len': mac_len,
+               'mac': mac,
+               'raw_dest_af_len': raw_dest_af_len,
+               'dest_af_len': dest_af_len,
+               'raw_dest_af': raw_dest_af,
+               'dest_af': dest_af,
+               'data': data,
+               'cryptor': cryptor}
         if cls.auth_tcp_fpacket(res):
             res['valid'] = True
         return res
@@ -598,29 +596,27 @@ class PacketParser():
             # if we get an error here, it means this is a invalid packet
             return res
 
-        res = {
-                'valid': False,
-                'raw_salt_len': raw_salt_len,
-                'salt_len': salt_len,
-                'salt': salt,
-                'raw_mac_len': raw_mac_len,
-                'mac_len': mac_len,
-                'mac': mac,
-                'raw_serial': raw_serial,
-                'serial': serial,
-                'raw_time': raw_time,
-                'time': time_,
-                'raw_iv_len': raw_iv_len,
-                'iv_len': iv_len,
-                'iv': iv,
-                'raw_dest_af_len': raw_dest_af_len,
-                'dest_af_len': dest_af_len,
-                'raw_dest_af': raw_dest_af,
-                'dest_af': dest_af,
-                'raw_data_len': raw_data_len,
-                'data_len': data_len,
-                'data': data,
-                }
+        res = {'valid': False,
+               'raw_salt_len': raw_salt_len,
+               'salt_len': salt_len,
+               'salt': salt,
+               'raw_mac_len': raw_mac_len,
+               'mac_len': mac_len,
+               'mac': mac,
+               'raw_serial': raw_serial,
+               'serial': serial,
+               'raw_time': raw_time,
+               'time': time_,
+               'raw_iv_len': raw_iv_len,
+               'iv_len': iv_len,
+               'iv': iv,
+               'raw_dest_af_len': raw_dest_af_len,
+               'dest_af_len': dest_af_len,
+               'raw_dest_af': raw_dest_af,
+               'dest_af': dest_af,
+               'raw_data_len': raw_data_len,
+               'data_len': data_len,
+               'data': data}
         if cls.auth_udp_packet(res):
             res['valid'] = True
         return res

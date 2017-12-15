@@ -55,18 +55,18 @@ def run_tou(config_path):
 
 if __name__ == '__main__':
     arg_parser = argparse.ArgumentParser(
-                    prog='ir-remote',
-                    )
+                     prog='ir-remote',
+                 )
     arg_parser.add_argument(
-            '-c',
-            metavar='<config_file>',
-            help='specify the config file',
-            )
+        '-c',
+        metavar='<config_file>',
+        help='specify the config file',
+    )
     arg_parser.add_argument(
-            '--tou',
-            action='store_true',
-            help='activate TCP over UDP mode',
-            )
+        '--tou',
+        action='store_true',
+        help='activate TCP over UDP mode',
+    )
 
     args = arg_parser.parse_args()
 

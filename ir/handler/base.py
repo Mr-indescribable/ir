@@ -2,6 +2,7 @@
 # coding: utf-8
 
 import os
+import sys
 import errno
 import logging
 import random
@@ -52,10 +53,12 @@ class TCPHandler():
             self._remote_port = self._config.get('remote_tcp_port')
             self._remote_af = (self._remote_ip, self._remote_port)
             self._dest_af = None
-            self._cryptor = Cryptor(self._config.get('cipher_name'),
-                                    self._config.get('passwd'),
-                                    self._config.get('crypto_libpath'),
-                                    self._iv)
+            self._cryptor = Cryptor(
+                                self._config.get('cipher_name'),
+                                self._config.get('passwd'),
+                                self._config.get('crypto_libpath'),
+                                self._iv
+                            )
         else:
             self._remote_ip = None
             self._remote_port = None
@@ -82,9 +85,9 @@ class TCPHandler():
         self._server._add_handler(fd, self)
 
     def _local_get_dest_af(self):
-        opt = self._local_sock.getsockopt(socket.SOL_IP,
-                                          SO_ORIGINAL_DST,
-                                          SO_ADDR_SIZE)
+        opt = self._local_sock.getsockopt(
+                  socket.SOL_IP, SO_ORIGINAL_DST, SO_ADDR_SIZE
+              )
         dest_info = tools.unpack_sockopt(opt)[1:]
         port = dest_info[0]
         ip = '.'.join([str(u) for u in dest_info[1:]])
@@ -103,8 +106,10 @@ class TCPHandler():
                 pass
             else:
                 return None
-        logging.debug('[TCP] Created remote socket @ %s:%d, fd: %d' %\
-                                        (*remote_af, remote_sock.fileno()))
+        logging.debug(
+            '[TCP] Created remote socket @ %s:%d, '
+            'fd: %d' % (*remote_af, remote_sock.fileno())
+        )
         return remote_sock
 
     def _epoll_modify_2_ro(self, sock):
@@ -142,8 +147,8 @@ class TCPHandler():
                 data = data[s:]
                 uncomplete = True
         except (OSError, IOError) as e:
-            if tools.errno_from_exception(e) in (errno.EAGAIN, errno.EINPROGRESS,
-                                                 errno.EWOULDBLOCK):
+            eno = tools.errno_from_exception(e)
+            if eno in (errno.EAGAIN, errno.EINPROGRESS, errno.EWOULDBLOCK):
                 uncomplete = True
             else:
                 self.destroy()
@@ -175,8 +180,8 @@ class TCPHandler():
         try:
             data = self._local_sock.recv(buf_size)
         except (OSError, IOError) as e:
-            if tools.errno_from_exception(e) in (errno.ETIMEDOUT, errno.EAGAIN,
-                                                 errno.EWOULDBLOCK):
+            eno = tools.errno_from_exception(e)
+            if eno in (errno.ETIMEDOUT, errno.EAGAIN, errno.EWOULDBLOCK):
                 return
         if not data:
             logging.info('[TCP] Got null data from local socket')
@@ -194,7 +199,8 @@ class TCPHandler():
                 data = self._cryptor.decrypt(data)
         self._data_2_remote.append(data)
         logging.debug(
-                '[TCP] %dB to %s:%d, stored' % (len(data), *self._remote_af))
+            '[TCP] %dB to %s:%d, stored' % (len(data), *self._remote_af)
+        )
         if self._remote_sock_poll_mode == 'ro':
             self._epoll_modify_2_rw(self._remote_sock)
 
@@ -215,7 +221,8 @@ class TCPHandler():
             self._data_2_remote = []
             self._write_to_sock(data, self._remote_sock)
             logging.debug(
-                    '[TCP] Sent %dB to %s:%d' % (len(data), *self._remote_af))
+                '[TCP] Sent %dB to %s:%d' % (len(data), *self._remote_af)
+            )
 
     def _on_remote_read(self):
         # This function is copied from
@@ -237,8 +244,8 @@ class TCPHandler():
         try:
             data = self._remote_sock.recv(buf_size)
         except (OSError, IOError) as e:
-            if tools.errno_from_exception(e) in (errno.ETIMEDOUT, errno.EAGAIN,
-                                                 errno.EWOULDBLOCK):
+            eno = tools.errno_from_exception(e)
+            if eno in (errno.ETIMEDOUT, errno.EAGAIN, errno.EWOULDBLOCK):
                 return
         if not data:
             logging.info('[TCP] Got null data from remote socket')
@@ -271,7 +278,8 @@ class TCPHandler():
             self._data_2_local = []
             self._write_to_sock(data, self._local_sock)
             logging.debug(
-                    '[TCP] Sent %dB to %s:%d' % (len(data), *self._src))
+                '[TCP] Sent %dB to %s:%d' % (len(data), *self._src)
+            )
 
     def _on_local_disconnect(self):
         if self._data_2_remote:
@@ -299,19 +307,17 @@ class TCPHandler():
         if self._is_local:
             self._dest_af = self._local_get_dest_af()
             data = PacketMaker.make_tcp_fpacket(
-                                            data, self._dest_af,
-                                            self._iv, self._cryptor,
-                                            self._server._iv_cryptor
-                                            )
+                       data, self._dest_af, self._iv, self._cryptor,
+                       self._server._iv_cryptor
+                   )
         else:
             res = PacketParser.parse_tcp_fpacket(
-                                            data,
-                                            self._server._iv_cryptor,
-                                            self._config
-                                            )
+                      data, self._server._iv_cryptor, self._config
+                  )
             if not res['valid']:
                 logging.info(
-                        '[TCP] Got invalid data from %s:%d' % self._src)
+                    '[TCP] Got invalid data from %s:%d' % self._src
+                )
                 self.destroy()
                 return
             data = res['data']
@@ -323,15 +329,17 @@ class TCPHandler():
         if data:
             events = select.EPOLLIN | select.EPOLLOUT | select.EPOLLRDHUP
             self._data_2_remote.append(data)
-            logging.debug('[TCP] %dB to %s:%d, stored' % (len(data),
-                                                          *self._remote_af))
+            logging.debug(
+                '[TCP] %dB to %s:%d, stored' % (len(data), *self._remote_af)
+            )
         else:
             events = select.EPOLLIN | select.EPOLLRDHUP
 
         if self._is_local:
             if not (self._remote_ip and self._remote_port):
                 raise ValueError(
-                        "Invalid configuration: remote_addr/remote_tcp_port")
+                          "Invalid configuration: remote_addr/remote_tcp_port"
+                      )
         else:
             if not (self._remote_ip and self._remote_port):
                 logging.info("[TCP] Got invalid dest info, do destroy")
@@ -340,8 +348,9 @@ class TCPHandler():
 
         self._remote_sock = self._create_remote_sock(self._remote_af)
         if not self._remote_sock:
-            logging.warn('[TCP] Cannot connect to %s:%d, do destroy' %\
-                                                         self._remote_af)
+            logging.warn(
+                '[TCP] Cannot connect to %s:%d, do destroy' % self._remote_af
+            )
             self.destroy()
             return
         if self._is_local:
@@ -401,8 +410,9 @@ class TCPHandler():
                 af = self._dest_af
             else:
                 af = self._remote_af
-            logging.info('[TCP] Remote socket @ %s:%d destroyed, fd: %d' %\
-                                                              (*af, rmt_fd))
+            logging.info(
+                '[TCP] Remote socket @ %s:%d destroyed, fd: %d' % (*af, rmt_fd)
+            )
 
     @property
     def destroyed(self):
@@ -435,7 +445,6 @@ class UDPHandler():
                 remote_port = config.get('remote_udp_port')
                 if not (remote_addr and remote_port):
                     logging.error('[UDP] Invalid remote udp configuration')
-                    import sys
                     sys.exit(1)
                 self._remote_af = (remote_addr, remote_port)
 
@@ -517,9 +526,9 @@ class UDPHandler():
 
             if self._server._multi_transmit:
                 serial = self._server._mth.next_serial()
-                self._server._mth.handle_transmit(self._client_sock, data,
-                                                  cryptor, self._dest, iv,
-                                                  serial)
+                self._server._mth.handle_transmit(
+                    self._client_sock, data, cryptor, self._dest, iv, serial
+                )
                 return
 
             data = PacketMaker.make_udp_packet(cryptor, data, self._dest, iv)
@@ -530,8 +539,9 @@ class UDPHandler():
             # UDPServer._server_sock_recv
             target = self._dest
         self._client_sock.sendto(data, target)
-        logging.debug('[UDP local_recv] Sent %dB to %s:%d' % (len(data),
-                                                              *target))
+        logging.debug(
+            '[UDP local_recv] Sent %dB to %s:%d' % (len(data), *target)
+        )
 
     def handle_remote_resp(self):
         data, src = self._client_sock.recvfrom(UDP_BUFFER_SIZE)
@@ -576,14 +586,16 @@ class UDPHandler():
             if self._server._multi_transmit:
                 serial = self._server._mth.next_serial()
                 af_list = [(addr, self._src_port) for addr in self._src_addrs]
-                self._server._mth.handle_transmit(self._server_sock, data,
-                                                  cryptor, self._dest, iv,
-                                                  serial, af_list)
+                self._server._mth.handle_transmit(
+                    self._server_sock, data, cryptor,
+                    self._dest, iv, serial, af_list
+                )
                 return
             data = PacketMaker.make_udp_packet(cryptor, data, self._src, iv)
             self._server_sock.sendto(data, self._src)
         logging.debug(
-                '[UDP remote_resp] Sent %dB to %s:%d' % (len(data), *self._src))
+            '[UDP remote_resp] Sent %dB to %s:%d' % (len(data), *self._src)
+        )
 
     def one_more_src(self, src):
         addr = src[0]
@@ -666,17 +678,21 @@ class UDPMultiTransmitHandler():
         last_salt_len = None
         for af in af_list:
             while salt_len == last_salt_len:
-                salt_len = random.randint(self._min_salt_len,
-                                          self._max_salt_len)
+                salt_len = random.randint(
+                               self._min_salt_len, self._max_salt_len
+                           )
             last_salt_len = salt_len
 
             salt = os.urandom(salt_len)
-            packet = PacketMaker.make_udp_packet(cryptor, data, dest_af, iv,
-                                                 serial, time_, salt)
+            packet = PacketMaker.make_udp_packet(
+                         cryptor, data, dest_af, iv, serial, time_, salt
+                     )
             for _ in range(self._transmit_times):
                 sock.sendto(packet, af)
-            logging.debug('[UDP_MT] sent %dB to %s:%d, times: %d' %\
-                                (len(packet), *af, self._transmit_times))
+            logging.debug(
+                '[UDP_MT] sent %dB to %s:%d, times: '
+                '%d' % (len(packet), *af, self._transmit_times)
+            )
 
     def handle_recv(self, packet):
         '''call this function after parsed a packet in multi-transmit mode
