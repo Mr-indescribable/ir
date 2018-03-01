@@ -8,10 +8,12 @@
 	"passwd": "An indescribable password",
 	"udp_socket_max_idle_time": 60,
 	"log_level": "info",
-	"log_file": {"tcp": "/tmp/ir-tcp.log",
-				 "udp": "/tmp/ir-udp.log",
-				 "tou_tcp": "/tmp/ir-tou-tcp.log",
-				 "tou_udp": "/tmp/ir-tou-udp.log"},
+	"log_file": {
+		"tcp": "/tmp/ir-tcp.log",
+		 "udp": "/tmp/ir-udp.log",
+		 "tou_tcp": "/tmp/ir-tou-tcp.log",
+		 "tou_udp": "/tmp/ir-tou-udp.log"
+	},
 	"crypto_libpath": "/usr/local/lib64/libcrypto.so.1.1",
 
 	"udp_multi_source": ["192.168.122.82", "192.168.122.23"],

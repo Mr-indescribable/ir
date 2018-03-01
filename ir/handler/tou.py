@@ -2,6 +2,7 @@
 #coding: utf-8
 
 import sys
+import time
 import select
 import socket
 import logging
@@ -47,6 +48,7 @@ class TCPHandler(BaseTCPHandler):
         self._is_local = is_local
         self._data_2_local = []
         self._data_2_remote = []
+        self._last_activate_time = time.time()
         self._remote_af = None
         self._remote_sock = None
         self._remote_connection_requested = False
@@ -265,6 +267,7 @@ class TCPHandler(BaseTCPHandler):
         self._add_sock_to_poll(self._tou_adapter._udp_sock, select.EPOLLIN)
 
     def handle_event(self, fd, evt, data=None):
+        self._last_activate_time = time.time()
         sock = self._fd_2_sock(fd)
         if not sock:
             logging.warn('[TOU] Unknow socket error')

@@ -171,10 +171,12 @@ class TCPServer(BaseTCPServer):
 
 class TOUUDPSocketCleaner(Thread):
 
-    def __init__(self, server, max_idle_time=4, poll_time=4):
+    def __init__(self, server, tou_conn_close_timeout=10,
+                       max_idle_time=5, poll_time=4):
         Thread.__init__(self, daemon=True)
 
         self._server = server
+        self.tou_close_timeout = tou_conn_close_timeout
         self.max_idle_time = max_idle_time
         self.poll_time = poll_time
 
@@ -184,18 +186,39 @@ class TOUUDPSocketCleaner(Thread):
             fds = list(self._server._fd_2_handler.keys())
             handlers = list(self._server._fd_2_handler.values())
             for fd, handler in zip(fds, handlers):
+                # destroy normally
                 if handler._waiting_for_destroy:
                     if now - handler.fb_last_recv_time > self.max_idle_time:
                         if handler.udp_destroyed:
                             self._server._remove_handler(fd)
                         else:
                             handler.destroy_tou_adapter()
+                        continue
+                # forced to destroy connections that timed-out
+                if (handler.tcp_destroyed and
+                    now - handler._last_activate_time > self.tou_close_timeout):
+                        if handler.udp_destroyed:
+                            self._server._remove_handler(fd)
+                        else:
+                            handler.destroy_tou_adapter()
+                            logging.warn(
+                                'Destroyed TCPHandler due to timeout'
+                            )
         else:
             src_ports = list(self._server._udp_src_port_2_handler.keys())
             handlers = list(self._server._udp_src_port_2_handler.values())
             for src_port, handler in zip(src_ports, handlers):
+                # destroy normally
                 if handler._waiting_for_destroy:
                     if now - handler.fb_last_recv_time > self.max_idle_time:
+                        if handler.udp_destroyed:
+                            self._server._remove_handler(src_port=src_port)
+                        else:
+                            handler.destroy_tou_adapter()
+                        continue
+                # forced to destroy connections that timed-out
+                if (handler.tcp_destroyed and
+                    now - handler._last_activate_time > self.tou_close_timeout):
                         if handler.udp_destroyed:
                             self._server._remove_handler(src_port=src_port)
                         else:

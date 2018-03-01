@@ -1,8 +1,10 @@
 {
 	"remote_addr": "192.168.122.164",
 	"tou_remote_tcp_port": 6040,
-	"tou_udp_multi_remote": {"192.168.122.164": 6060,
-							 "192.168.122.23": 6060},
+	"tou_udp_multi_remote": {
+		"192.168.122.164": 6060,
+		 "192.168.122.23": 6060
+	},
 
 	"listen_addr": "127.0.0.1",
 	"listen_udp_port": 60050,
@@ -14,14 +16,18 @@
 	"passwd": "An indescribable password",
 	"udp_socket_max_idle_time": 60,
 	"log_level": "info",
-	"log_file": {"tcp": "/tmp/ir-tcp.log",
-				 "udp": "/tmp/ir-udp.log",
-				 "tou_tcp": "/tmp/ir-tou-tcp.log",
-				 "tou_udp": "/tmp/ir-tou-udp.log"},
+	"log_file": {
+		"tcp": "/tmp/ir-tcp.log",
+		 "udp": "/tmp/ir-udp.log",
+		 "tou_tcp": "/tmp/ir-tou-tcp.log",
+		 "tou_udp": "/tmp/ir-tou-udp.log"
+	},
 	"crypto_libpath": "/usr/lib/libcrypto.so.1.1",
 
-	"udp_multi_remote": {"192.168.122.164": 6050,
-						 "192.168.122.23": 6050},
+	"udp_multi_remote": {
+		"192.168.122.164": 6050,
+		 "192.168.122.23": 6050
+	},
 
 	"udp_multi_transmit_times": 1,
 	"udp_multi_transmit_max_packet_serial": 32768,
