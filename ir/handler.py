@@ -179,9 +179,8 @@ class TCPHandler():
                                                  errno.EWOULDBLOCK):
                 return
         if not data:
-            logging.info('[TCP] Got null data from local socket')
-            if not self._is_local:
-                self.destroy()
+            logging.debug('[TCP] Got null data from local socket')
+            self.destroy()
             return
 
         if self._is_local:
@@ -242,7 +241,8 @@ class TCPHandler():
                                                  errno.EWOULDBLOCK):
                 return
         if not data:
-            logging.info('[TCP] Got null data from remote socket')
+            logging.debug('[TCP] Got null data from remote socket')
+            self.destroy()
             return
 
         if self._is_local:
