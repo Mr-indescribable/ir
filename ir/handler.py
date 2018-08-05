@@ -180,6 +180,7 @@ class TCPHandler():
                 return
         if not data:
             logging.info('[TCP] Local socket got null data')
+            self.destroy()
             return
 
         if self._is_local:
@@ -446,8 +447,7 @@ class UDPHandler():
             self._iv_change_rate = self._config.get('udp_iv_change_rate')
 
         if self._server._multi_transmit and not self._is_local:
-            self._src_addrs = [src[0]]
-            self._src_port = src[1]
+            self._srcs = [src]
 
     def _create_client_sock(self):
         client_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -562,7 +562,7 @@ class UDPHandler():
 
             if self._server._multi_transmit:
                 serial = self._server._mth.next_serial()
-                af_list = [(addr, self._src_port) for addr in self._src_addrs]
+                af_list = self._srcs
                 self._server._mth.handle_transmit(self._server_sock, data,
                                                   cryptor, self._dest, iv,
                                                   serial, af_list)
@@ -573,9 +573,8 @@ class UDPHandler():
                 '[UDP remote_resp] Sent %dB to %s:%d' % (len(data), *self._src))
 
     def one_more_src(self, src):
-        addr = src[0]
-        if addr not in self._src_addrs:
-            self._src_addrs.append(addr)
+        if src not in self._srcs:
+            self._srcs.append(src)
 
     def destroy(self):
         if self._destroyed:
